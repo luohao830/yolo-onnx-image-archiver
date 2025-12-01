@@ -1,0 +1,37 @@
+# Python 构建与缓存
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+ENV/
+env/
+
+# 工具与编辑器
+.vscode/
+.idea/
+.DS_Store
+.cache/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# 数据与模型目录（挂载/生成内容）
+images/
+models/
+fo_data/
+runs/
+webui/outputs/
+
+# Docker/环境配置
+.env
+docker-compose.override.yml
