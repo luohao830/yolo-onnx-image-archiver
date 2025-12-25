@@ -1,16 +1,29 @@
-# 1. 使用官方 YOLOv5 镜像
-FROM ultralytics/yolov5:v7.0
+# 轻量化推理环境：仅 ONNXRuntime-GPU + Gradio
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
-# 2. 接收代理参数 (虽然用国内源不需要代理，但留着防止其他包需要)
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ENV HTTP_PROXY=$HTTP_PROXY
 ENV HTTPS_PROXY=$HTTPS_PROXY
 
-# 3. 安装 FiftyOne 和 Gradio
-# === 关键修改：加入清华源 -i https://pypi.tuna.tsinghua.edu.cn/simple ===
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install fiftyone gradio -i https://pypi.tuna.tsinghua.edu.cn/simple
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
 
-# 4. 设置工作目录
-WORKDIR /usr/src/app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-venv \
+    libglib2.0-0 libsm6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/app
+
+RUN python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir \
+      numpy opencv-python-headless onnxruntime-gpu gradio
+
+COPY app ./app
+COPY webui ./webui
+COPY yolo-fiftyone.md ./yolo-fiftyone.md
+
+EXPOSE 7860
+
+CMD ["python3", "webui/app.py"]

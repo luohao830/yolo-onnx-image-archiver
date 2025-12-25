@@ -30,6 +30,10 @@ images/
 models/
 fo_data/
 runs/
+data/*
+!data/.gitkeep
+exports/*
+!exports/.gitkeep
 webui/outputs/
 
 # Docker/环境配置

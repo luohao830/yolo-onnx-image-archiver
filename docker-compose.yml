@@ -1,54 +1,35 @@
 version: '3.8'
 
 services:
-  mongo:
-    image: mongo:5.0
-    container_name: fo_mongo
-    restart: always
-    volumes:
-      - ./fo_data:/data/db
-    command: --wiredTigerCacheSizeGB 1
-
   app:
-    build: 
+    build:
       context: .
       args:
         HTTP_PROXY: http://192.168.11.151:7890
         HTTPS_PROXY: http://192.168.11.151:7890
-    container_name: fast_search
+    container_name: image_tagger
     restart: always
-    
-    # === [优化1] 增加共享内存，防止 PyTorch 崩溃 ===
-    shm_size: '16gb' 
-    
+
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              # === [确认] 这里 '1' 代表第二张卡 (Index 1) ===
-              device_ids: ['1'] 
+              device_ids: ['1']
               capabilities: [gpu]
+
     ports:
-      - "55151:5151"
       - "57860:7860"
+
     volumes:
-      # === [提示] 这里目前挂载的是当前目录的 ./images ===
-      # 如果你要用那 30TB 的 RAID-Z1 存储池，记得要把路径改过去
-      # 例如: - /mnt/your_pool/video_data:/dataset 
-      - ./images:/dataset
-      - ./models:/models
-      - ./scripts:/scripts
-      - ./webui:/webui
+      - ./images:/data/images
+      - ./models:/data/models
+      - ./data:/data/state
+      - ./exports:/data/exports
+
     environment:
-      - FIFTYONE_DATABASE_URI=mongodb://mongo:27017
       - LC_ALL=C.UTF-8
       - LANG=C.UTF-8
       - GRADIO_SERVER_NAME=0.0.0.0
-      # === [优化2] 显式强制内部流量不走代理 ===
-      - no_proxy=localhost,127.0.0.1,mongo,fo_mongo
-    
-    depends_on:
-      - mongo
-      
-    command: sh -c "fiftyone app launch --port 5151 --address 0.0.0.0 --remote > /dev/null 2>&1 & python3 /webui/app.py"
+      - no_proxy=localhost,127.0.0.1
+

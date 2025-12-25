@@ -1,111 +1,71 @@
-# 项目架构文档：基于 YOLOv5 与 FiftyOne 的大规模图像检索系统
+# 项目架构文档：轻量化多模型打标与导出系统（ONNXRuntime-GPU）
 
-## 1. 项目概述
+## 1. 最新需求（以此为准）
 
-本项目旨在构建一个基于 Docker 的高性能本地图像/视频推理与检索服务。利用服务器强大的 GPU 算力（RTX 4090），通过 YOLOv5 进行目标检测，并将结果导入 FiftyOne 进行可视化管理和检索。用户通过 Gradio WebUI 进行交互控制。
+你当前的真实需求不是“训练/完整 YOLOv5 环境”，而是面向海量采集图片的**轻量推理+管理**：
 
-### 核心目标
+- **推理后端唯一**：仅使用 `onnxruntime-gpu`（不再支持 `.pt`/PyTorch 推理），模型文件为 `.onnx`
+- **多模型分次推理**：同一批图片可用不同模型分批推理，结果**叠加**到同一套标签体系里
+- **默认 top1**：每张图取最高置信度检测类别作为该模型的标签；无检测打 `no_detection`
+- **纯 Web 管理**：不使用 CLI；Web 页面负责同步/推理/浏览/导出
+- **按标签浏览**：Web 中可选择某个标签查看图片列表/缩略图
+- **导出为 ZIP**：按标签导出 ZIP，带进度条；导出过程使用**硬链接 staging** 来节省空间（同一文件系统时生效，失败自动回退复制）
+- **整体轻量化**：移除 `ultralytics/yolov5` 镜像和 PyTorch 依赖；减少服务数量与启动成本
 
-- **自动化推理**：对指定目录下的海量图片/视频进行批量 YOLOv5 推理。
-- **可视化检索**：利用 FiftyOne 提供的高级界面，根据检测到的物体（标签）、置信度等进行筛选和查看。
-- **硬件隔离**：指定使用服务器的特定 GPU（Index 1）运行，互不干扰。
-- **持久化存储**：确保 Dataset 和 MongoDB 数据在容器重启后不丢失。
+## 2. 为什么之前代码在 `webui/`
 
-## 2. 系统架构
+历史原因是 docker-compose 将 `./webui` 作为“UI 代码挂载点”来热更新，便于快速迭代 Gradio/FiftyOne。  
+但随着需求升级为“完整的轻量化平台”，把所有逻辑都堆在 `webui/` 会导致：职责混乱、可测试性差、后端难替换（例如从 PyTorch 切 ONNX）。
 
-系统由三个核心 Docker 服务和一套 Python 业务逻辑组成。
+因此本次重构目标是：
 
-### 2.1 容器服务架构 (Docker Compose)
+- `webui/` 只保留**Web UI 入口/展示层**
+- 核心能力拆分为独立模块（索引、推理、存储、导出、任务管理），便于替换与扩展
 
-1. **MongoDB (`mongo:5.0`)**:
-   - **职责**: 存储 FiftyOne 的数据集元数据（Metadata）、标签（Labels）、检测框（Bounding Boxes）。
-   - **配置**: 限制 WiredTiger 缓存为 1GB，防止内存溢出。
-2. **应用容器 (`app`)**:
-   - **基础镜像**: `ultralytics/yolov5:v7.0` (PyTorch环境)。
-   - **附加组件**: FiftyOne, Gradio。
-   - **硬件资源**: 映射 GPU 1，开启 16GB 共享内存 (`shm_size`)。
-   - **端口**:
-     - `5151`: FiftyOne App (可视化界面)。
-     - `7860`: Gradio WebUI (控制台)。
+## 3. 新架构（模块化）
 
-### 2.2 Python 业务逻辑分层
+### 3.1 组件
 
-为了保证代码的可维护性，业务代码将分为三层：
+- **Web UI（Gradio）**：发起“同步/推理/导出”任务；浏览标签、预览图片
+- **任务执行器**：串行执行耗时任务（避免 GPU/IO 争用），提供进度与状态
+- **元数据存储（SQLite）**：保存图片清单、模型、每次推理结果（按模型维度）、导出记录
+- **推理引擎（ONNXRuntime-GPU）**：加载 `.onnx`，做预处理/推理/NMS/后处理，输出检测与 top1 标签
 
-1. **UI 层 (`app.py`)**:
-   - 基于 Gradio 构建。
-   - 负责接收用户指令（输入路径、选择模型、设置数据集名称）。
-   - 显示实时日志和进度。
-   - 提供跳转到 FiftyOne 的链接。
-2. **处理层 (`processing.py`)**:
-   - **YOLO 推理引擎**: 封装 `torch.hub` 或 `detect.py` 逻辑，支持批量推理。
-   - **数据清洗**: 过滤低置信度结果，转换坐标格式（YOLO xywh -> FiftyOne xywh）。
-3. **工具层 (`utils.py`)**:
-   - 封装日志、路径扫描、配置读取等辅助能力。
-   - 与 MongoDB/FiftyOne 交互的通用方法集中于此，供 `processing.py` 调用（例如创建/加载 Dataset、批量写入 Samples）。
+> 注：为了轻量化，默认不再依赖 MongoDB/FiftyOne；如未来确实需要高级可视化，再作为可选插件加入。
 
-## 3. 目录结构设计
+### 3.2 数据模型（建议）
 
-宿主机与容器内的目录映射关系如下：
+- `images(path UNIQUE, added_at, width, height, ...)`
+- `models(model_id UNIQUE, onnx_path, imgsz, class_names, ...)`
+- `runs(run_id, model_id, started_at, ended_at, conf, status, error)`
+- `predictions(image_id, model_id, run_id, label, confidence, created_at)`（每图每模型默认一条 top1；无检测为 `no_detection`）
+
+### 3.3 标签语义（便于筛选与导出）
+
+- **聚合标签**：跨模型汇总后的标签列表（例如 `person`、`device`、`no_detection`）
+- **模型标签**：同一标签在不同模型下的归因（例如 `person_v1:person`）
+
+## 4. 目录结构（重构后）
 
 ```
 Project_Root/
-├── docker-compose.yml       # 容器编排
-├── Dockerfile               # 镜像构建
-├── fo_data/                 # [映射] MongoDB 数据持久化目录
-├── images/                  # [映射] 待处理的图片/视频数据集根目录
-├── models/                  # [映射] 存放 .pt 模型文件 (yolov5s.pt, custom.pt)
-├── webui/                   # [映射] Python 源代码目录
-│   ├── app.py               # 程序入口 (Gradio)
-│   ├── processing.py        # 推理与数据处理核心逻辑
-│   └── utils.py             # 工具函数 (日志、路径扫描)
-└── scripts/                 # [映射] 临时脚本
+├── docker-compose.yml
+├── Dockerfile
+├── images/                  # 输入媒资（不移动）
+├── models/                  # 仅存放 .onnx（.pt 不再用于推理）
+├── data/                    # SQLite、导出产物等（新增）
+├── app/                     # 后端核心模块（索引/推理/导出/存储/任务）
+└── webui/                   # 纯 UI 入口（调用 app/ 提供的能力）
 ```
 
-## 4. 核心功能流程 (Workflow)
+## 5. 核心流程（纯 Web）
 
-### 阶段一：初始化
+1. **同步**：扫描 `/images`（可递归）个 `.onnx` 模型（`model_id`），对未处理（或选择覆盖）的图片推理，写入 `predictions`，增量写入 SQLite（仅新增，不删除）
+2. **推理打标**：选择一
+3. **按标签浏览**：选择标签（可选模型维度），展示对应图片缩略图/列表
+4. **导出 ZIP**：按标签收集图片，staging 目录优先硬链接，再压缩为 ZIP，提供下载
 
-1. 启动 Docker 容器。
-2. FiftyOne App 在后台启动（监听 5151）。
-3. Gradio App 在前台启动（监听 7860）。
+## 6. 非目标（本阶段不做）
 
-### 阶段二：用户操作 (Gradio)
-
-1. **输入设置**:
-   - **数据集名称**: 例如 "korean_traffic_2023"。
-   - **图片路径**: 例如 `/dataset/raw_images` (容器内路径)。
-   - **模型选择**: 下拉选择 `/models` 目录下的 `.pt` 文件。
-   - **置信度阈值**: Slider (0.1 - 0.9)。
-2. **点击 "开始处理"**:
-   - 系统扫描目录下所有图片格式文件。
-   - **增量检查**: 如果图片已存在于 Dataset 中，选择跳过或覆盖。
-3. **处理中 (Batch Processing)**:
-   - 加载 YOLO 模型到 GPU 1。
-   - 分批次（Batch Size）读取图片。
-   - 执行推理 -> 获取 Bbox 和 Label。
-   - 将结果转换为 FiftyOne Sample 对象。
-   - 写入 MongoDB。
-   - Gradio 界面更新进度条。
-
-### 阶段三：结果浏览
-
-1. 处理完成后，Gradio 提示 "导入完成"。
-2. 用户点击链接访问 `http://<server-ip>:5151`。
-3. 在 FiftyOne 界面中通过 SQL-like 语法查询（例如：`Label == 'person' & Confidence > 0.8`）。
-
-## 5. 关键技术细节与约束
-
-1. **内存管理**:
-   - 不能一次性将所有图片读入内存。必须使用 **生成器 (Generator)** 模式，读一批、推一批、存一批。
-2. **坐标转换**:
-   - YOLO 输出: `[x_center, y_center, width, height]` (归一化 0-1)。
-   - FiftyOne 需要: `[top-left-x, top-left-y, width, height]` (归一化 0-1)。
-   - **必须在代码中进行转换，否则框的位置会偏。**
-3. **并发锁**:
-   - MongoDB 对并发写入敏感，尽量单线程写入 FiftyOne Dataset，或者使用 FiftyOne 的 `dataset.add_samples()` 批量写入接口。
-
-## 6. 待确认项 (To-Do)
-
-- **视频处理**: 目前优先支持图片。视频需要抽帧处理，是否需要在此版本加入？(建议 V1.0 仅支持图片，V1.5 加入视频抽帧)。
-- **模型来源**: 默认使用 `yolov5s.pt`，是否需要自动下载其他模型？
+- 训练/微调、模型下载器、视频抽帧
+- TensorRT 引擎生成（后续可加，但默认先稳的 ONNXRuntime-GPU）
