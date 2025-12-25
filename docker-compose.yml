@@ -1,35 +1,21 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  app:
-    build:
-      context: .
-      args:
-        HTTP_PROXY: http://192.168.11.151:7890
-        HTTPS_PROXY: http://192.168.11.151:7890
-    container_name: image_tagger
-    restart: always
-
+  infer:
+    build: .
+    container_name: yolo_onnx_infer_link
+    restart: unless-stopped
+    shm_size: "2gb"
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['1']
+              device_ids: ["2"]
               capabilities: [gpu]
-
-    ports:
-      - "57860:7860"
-
     volumes:
       - ./images:/data/images
       - ./models:/data/models
-      - ./data:/data/state
-      - ./exports:/data/exports
-
-    environment:
-      - LC_ALL=C.UTF-8
-      - LANG=C.UTF-8
-      - GRADIO_SERVER_NAME=0.0.0.0
-      - no_proxy=localhost,127.0.0.1
-
+    # 默认保持容器常驻，方便 `docker compose exec infer bash` 进入后手动执行推理命令
+    entrypoint: ["bash", "-lc"]
+    command: ["sleep infinity"]

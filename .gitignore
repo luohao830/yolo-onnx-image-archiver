@@ -1,41 +1,11 @@
-# Python 构建与缓存
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# 虚拟环境
 .venv/
-venv/
-ENV/
-env/
-
-# 工具与编辑器
-.vscode/
-.idea/
-.DS_Store
-.cache/
-.coverage
-htmlcov/
 .pytest_cache/
 .mypy_cache/
+.DS_Store
 
-# 数据与模型目录（挂载/生成内容）
+# 数据/模型/输出（通常很大）
 images/
 models/
-fo_data/
-runs/
-data/*
-!data/.gitkeep
-exports/*
-!exports/.gitkeep
-webui/outputs/
-
-# Docker/环境配置
-.env
-docker-compose.override.yml
+images/output/
