@@ -14,6 +14,8 @@ COPY requirements.txt /app/requirements.txt
 RUN python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir -r /app/requirements.txt
 
-COPY infer_link.py /app/infer_link.py
+COPY webui /app/webui
 
-ENTRYPOINT ["python3", "/app/infer_link.py"]
+EXPOSE 7860
+
+ENTRYPOINT ["python3", "-m", "webui.app"]

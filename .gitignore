@@ -4,8 +4,18 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .DS_Store
+.python-version
+.codex/
 
-# 数据/模型/输出（通常很大）
-images/
-models/
-images/output/
+images/*
+!images/.gitkeep
+!images/uploads/
+!images/uploads/.gitkeep
+!images/output/
+!images/output/.gitkeep
+
+models/*.onnx
+*.zip
+*.tar
+*.tar.gz
+*.7z

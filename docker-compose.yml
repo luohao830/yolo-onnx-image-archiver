@@ -1,9 +1,7 @@
-version: "3.8"
-
 services:
-  infer:
+  app:
     build: .
-    container_name: yolo_onnx_infer_link
+    container_name: yolo_onnx_webui
     restart: unless-stopped
     shm_size: "2gb"
     deploy:
@@ -11,11 +9,14 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["2"]
+              device_ids: ["1"]
               capabilities: [gpu]
+    ports:
+      - "57860:7860"
     volumes:
       - ./images:/data/images
       - ./models:/data/models
-    # 默认保持容器常驻，方便 `docker compose exec infer bash` 进入后手动执行推理命令
-    entrypoint: ["bash", "-lc"]
-    command: ["sleep infinity"]
+      - ./webui:/app/webui
+    environment:
+      - IMAGES_DIR=/data/images
+      - MODELS_DIR=/data/models
