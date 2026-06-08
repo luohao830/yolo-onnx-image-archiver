@@ -6,6 +6,9 @@ __pycache__/
 .DS_Store
 .python-version
 .codex/
+.codegraph/
+.superpowers/
+.worktrees/
 
 images/*
 !images/.gitkeep
