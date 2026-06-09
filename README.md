@@ -1,187 +1,135 @@
-# YOLO ONNX WebUI 推理归档工具
+# YOLO 公网多用户推理平台
 
-这是一个基于 Gradio 的 WebUI 工具，用于批量运行 YOLO 系列 ONNX 模型，并按检测类别归档图片。项目只提供 WebUI 访问方式，适合在本机或 Docker 容器中处理大批量图片。
+当前仓库正在从单机 Gradio 工具重构为一个面向公网匿名用户的多用户推理平台。现阶段已经具备以下三块基础能力：
 
-公开仓库不包含模型权重和业务图片数据。使用前需要自行准备 `.onnx` 模型和待处理图片。
+- `backend/`：FastAPI 后端，提供公开任务接口和管理员接口
+- `frontend/user-app/`：匿名用户前台
+- `frontend/admin-app/`：管理员后台
 
-## 功能
+旧的 `webui/` 仍然保留，作为推理内核和调试入口，不再是默认容器入口。
 
-- 通过页面选择或上传 `.onnx` 模型。
-- 通过页面上传图片，或直接选择 `images/` 下已有图片目录。
-- 支持官方 COCO 类别和自训练模型类别文件。
-- 支持按关注类别过滤检测结果。
-- 将结果写入 `images/output/<run_id>/<类别>/images/`。
-- 可选导出 YOLO txt 标签到 `labels/`。
-- 可选输出画框图片到 `<类别>_画框/images/`。
-- 可选将输出目录打包为 zip 供页面下载。
-- 支持 GPU 优先推理，也可在页面切换为 CPU 推理。
+## 用户前台
 
-## 目录结构
+用户前台位于 `frontend/user-app/`，当前已接通的页面包括：
 
-```text
-.
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── images/
-│   ├── uploads/
-│   └── output/
-├── models/
-└── webui/
+- 首页
+- 人员筛选模式入口
+- 高级模式入口
+- 任务凭证查询页
+- 任务结果轮询页
+
+本地开发：
+
+```bash
+cd frontend/user-app
+npm install
+npm run dev
 ```
 
-关键目录说明：
-
-- `images/`：待处理图片和输出结果目录。
-- `images/uploads/`：通过 WebUI 上传图片时的默认保存目录。
-- `images/output/`：推理结果和 zip 输出目录。
-- `models/`：放置 `.onnx` 模型和同名类别文件。
-- `webui/`：Gradio 页面、推理任务管理和后处理代码。
-
-## 准备模型和图片
-
-将 ONNX 模型放入 `models/`：
+默认开发地址：
 
 ```text
-models/your_model.onnx
+http://127.0.0.1:5173
 ```
 
-将图片放入 `images/` 下的任意子目录：
+Vite 已配置 `/api -> http://127.0.0.1:8000` 代理。
+
+## 管理员后台
+
+管理员后台位于 `frontend/admin-app/`，当前已接通的页面包括：
+
+- 管理员密钥登录页
+- 模型管理页
+- 系统配置页
+- 任务监控页
+
+本地开发：
+
+```bash
+cd frontend/admin-app
+npm install
+npm run dev
+```
+
+默认开发地址：
 
 ```text
-images/example_set/
-├── image_001.jpg
-└── image_002.jpg
+http://127.0.0.1:5174
 ```
 
-也可以启动 WebUI 后在页面中上传模型和图片。
+同样可通过 Vite 代理访问本地后端 API。
 
-## Docker 运行
+## API 服务
 
-容器内包含 CUDA 12 与 cuDNN 运行时，适合使用 `onnxruntime-gpu`。
-
-构建并启动：
+默认容器入口已经切换为 FastAPI：
 
 ```bash
 docker compose build
 docker compose up -d
 ```
 
-访问 WebUI：
+默认 API 地址：
 
 ```text
-http://localhost:57860
+http://127.0.0.1:58000
 ```
 
-默认 GPU 设备索引在 `docker-compose.yml` 中配置为 `["1"]`。如果机器只有一张显卡，通常需要改为 `["0"]`。
+关键接口：
 
-停止服务：
+- `GET /api/healthz`
+- `POST /api/jobs`
+- `GET /api/jobs/{job_code}?access_token=...`
+- `POST /api/admin/login`
+- `GET /api/admin/models`
+- `GET /api/admin/configs`
+- `GET /api/admin/jobs`
 
-```bash
-docker compose down
-```
-
-查看日志：
-
-```bash
-docker compose logs -f app
-```
-
-## 本机运行
-
-安装依赖：
-
-```bash
-pip install -r requirements.txt
-```
-
-启动 WebUI：
-
-```bash
-IMAGES_DIR=./images MODELS_DIR=./models python -m webui.app
-```
-
-默认监听：
-
-```text
-http://localhost:7860
-```
-
-如果不设置环境变量，程序默认使用：
-
-- `IMAGES_DIR=/data/images`
-- `MODELS_DIR=/data/models`
-
-## Backend Dev
-
-如果你正在开发多用户平台的后端内核，可以直接在仓库根目录运行：
+本地后端开发：
 
 ```bash
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 python -m pytest tests/backend -v
 ```
 
-健康检查接口：
+## runtime 目录
+
+运行时目录统一收口到 `runtime/`，主要用于：
+
+- 上传包暂存
+- 任务工作目录
+- 推理结果目录
+- 临时文件目录
+- SQLite 数据库文件 `runtime/app.db`
+
+建议将 `runtime/` 视为持久化工作区，不要直接提交其中的运行产物。
+
+## 模型发布流程
+
+当前推荐流程如下：
+
+1. 将 `.onnx` 模型及可选 sidecar 文件放入 `models/`
+2. 启动后端服务
+3. 通过管理员后台登录
+4. 在模型管理页创建模型记录并发布
+5. 将某个 `person_detector` 模型设为默认人检模型
+
+当前版本已经打通模型记录、发布状态、默认人检模型和高级模式可见性的管理接口；模型文件上传本身仍以本地目录投放为主，后续再接入后台上传。
+
+## 目录概览
 
 ```text
-http://127.0.0.1:8000/api/healthz
+.
+├── backend/
+├── frontend/
+│   ├── admin-app/
+│   └── user-app/
+├── models/
+├── runtime/
+└── webui/
 ```
 
-当前阶段的后端实现和验证范围只包含：
+## 兼容说明
 
-- `backend/`
-- `tests/backend/`
-
-## 类别文件 sidecar
-
-自训练模型建议提供同名类别文件，WebUI 会用于展示类别筛选项和输出目录名称。
-
-支持以下格式：
-
-- `model.names`：每行一个类别名。
-- `model.txt`：每行一个类别名。
-- `model.json`：`{"names": [...]}` 或 `[...]`。
-
-示例：
-
-```text
-models/fire.onnx
-models/fire.names
-```
-
-如果模型 ONNX metadata 中已经包含 `names`，程序会优先读取 metadata。
-
-## 输出结构
-
-一次推理会生成一个运行目录：
-
-```text
-images/output/20260604_153000/
-├── person/
-│   ├── images/
-│   └── labels/
-├── car/
-│   ├── images/
-│   └── labels/
-└── no_detection/
-    ├── images/
-    └── labels/
-```
-
-说明：
-
-- `images/` 下默认使用硬链接归档，避免重复占用大量磁盘空间。
-- 如果页面关闭“必须硬链接”，硬链接失败时会回退为复制。
-- `labels/` 仅在页面勾选“导出 YOLO txt 到 labels/”时写入。
-- 画框图片仅在页面勾选“输出画框图片到 <类别>_画框”时写入。
-
-## 公开仓库说明
-
-本仓库刻意不提交以下内容：
-
-- `.onnx` 模型权重。
-- 原始图片数据。
-- 推理输出目录。
-- 临时压缩包和 Python 缓存。
-
-如果需要发布可复现实验结果，建议在 GitHub Release、对象存储或内部文件服务器中单独管理模型权重和数据集。
+- `webui/` 仍可作为旧工具链和推理调试入口
+- 默认 Docker 入口已不再启动 Gradio
+- 管理员与匿名用户前端目前以独立开发站点运行，尚未做容器内静态托管整合
