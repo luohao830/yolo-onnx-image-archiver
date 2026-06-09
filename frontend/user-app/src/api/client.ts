@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 export type JobMode = "person_filter" | "advanced";
+export type JobStatus = "created" | "uploaded" | "running" | "completed" | "failed";
 
 export interface CreateJobResponse {
   job_code: string;
@@ -16,7 +17,7 @@ export interface PublishedModel {
 export interface PublicJobStatus {
   job_code: string;
   mode: JobMode;
-  status: string;
+  status: JobStatus;
   error_message?: string | null;
 }
 
