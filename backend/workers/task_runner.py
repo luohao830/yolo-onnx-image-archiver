@@ -34,10 +34,12 @@ class TaskRunner:
         )
 
         try:
+            if not getattr(job, "input_path", None):
+                raise ValueError("job input path is missing")
             with self.gpu_gate.acquire():
                 summary = inference_adapter.run_job_inference(
                     model_path=Path(model.onnx_path),
-                    images_dir=Path(job.images_dir),
+                    images_dir=Path(job.input_path),
                     out_dir=out_dir,
                     payload=payload,
                 )

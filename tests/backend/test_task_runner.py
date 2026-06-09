@@ -2,6 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
+from backend.core.db import build_engine, create_all, session_scope
+from backend.db.models import ModelRecord
+from backend.repositories.jobs import JobRepository
+from backend.repositories.models import ModelRepository
 from backend.services.runtime_paths import RuntimePaths
 from backend.workers.task_runner import TaskRunner
 
@@ -17,7 +21,7 @@ def test_task_runner_marks_completed(monkeypatch, tmp_path: Path) -> None:
         id=1,
         job_code="JOB-001",
         model_id=10,
-        images_dir=str(tmp_path / "images"),
+        input_path=str(tmp_path / "images"),
         payload_json={"recursive": True, "batch": 8, "imgsz": None, "conf": 0.25, "iou": 0.45},
     )
     model_repo = MagicMock()
@@ -78,7 +82,7 @@ def test_task_runner_marks_failed_when_inference_raises(monkeypatch, tmp_path: P
         id=1,
         job_code="JOB-002",
         model_id=10,
-        images_dir=str(tmp_path / "images"),
+        input_path=str(tmp_path / "images"),
         payload_json=None,
     )
     model_repo = MagicMock()
@@ -133,7 +137,7 @@ def test_task_runner_packages_output_from_summary_directory(monkeypatch, tmp_pat
         id=1,
         job_code="JOB-003",
         model_id=10,
-        images_dir=str(tmp_path / "images"),
+        input_path=str(tmp_path / "images"),
         payload_json={"draw_boxes": True, "save_txt": True},
     )
     model_repo = MagicMock()
@@ -162,3 +166,106 @@ def test_task_runner_packages_output_from_summary_directory(monkeypatch, tmp_pat
     assert call_kwargs["payload"]["batch"] == 16
     assert call_kwargs["payload"]["copy_fallback"] is False
     package_job_output.assert_called_once_with(tmp_path / "summary-results")
+
+
+def test_task_runner_persists_completion_with_real_repositories(monkeypatch, tmp_path: Path) -> None:
+    summary = {"out_dir": str(tmp_path / "results"), "total": 4, "written": 4}
+    monkeypatch.setattr("backend.services.inference_adapter.run_job_inference", MagicMock(return_value=summary))
+    monkeypatch.setattr("backend.services.inference_adapter.package_job_output", MagicMock(return_value=str(tmp_path / "results.zip")))
+
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    runtime_paths = RuntimePaths(tmp_path / "runtime")
+    job_id = None
+
+    with session_scope(engine) as session:
+        model = ModelRecord(onnx_path=str(tmp_path / "model.onnx"))
+        session.add(model)
+        session.flush()
+
+        job_repo = JobRepository(session)
+        job = job_repo.create_job(
+            job_code="JOB-100",
+            access_token_hash="hash",
+            mode="person_filter",
+            model_id=model.id,
+            payload_json={"recursive": False, "batch": 4},
+        )
+        job_repo.mark_uploaded(job.id, input_path=str(images_dir))
+        job_id = job.id
+
+    with session_scope(engine) as session:
+        runner = TaskRunner(
+            job_repo=JobRepository(session),
+            model_repo=ModelRepository(session),
+            config_repo=MagicMock(),
+            gpu_gate=_DummyGpuGate(),
+            runtime_paths=runtime_paths,
+        )
+        runner.run(job_id=job_id)
+
+    with session_scope(engine) as session:
+        saved = JobRepository(session).get(job_id)
+        assert saved.status == "completed"
+        assert saved.input_path == str(images_dir)
+        assert saved.result_dir == str(tmp_path / "results")
+        assert saved.result_zip_path == str(tmp_path / "results.zip")
+        assert saved.error_message is None
+
+
+def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("backend.services.inference_adapter.run_job_inference", MagicMock(side_effect=RuntimeError("gpu unavailable")))
+    monkeypatch.setattr("backend.services.inference_adapter.package_job_output", MagicMock())
+
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    runtime_paths = RuntimePaths(tmp_path / "runtime")
+    job_id = None
+
+    with session_scope(engine) as session:
+        model = ModelRecord(onnx_path=str(tmp_path / "model.onnx"))
+        session.add(model)
+        session.flush()
+
+        job_repo = JobRepository(session)
+        job = job_repo.create_job(
+            job_code="JOB-101",
+            access_token_hash="hash",
+            mode="advanced",
+            model_id=model.id,
+            payload_json={"execution_device": "cpu"},
+        )
+        job_repo.mark_uploaded(job.id, input_path=str(images_dir))
+        job_id = job.id
+
+    with session_scope(engine) as session:
+        runner = TaskRunner(
+            job_repo=JobRepository(session),
+            model_repo=ModelRepository(session),
+            config_repo=MagicMock(),
+            gpu_gate=_DummyGpuGate(),
+            runtime_paths=runtime_paths,
+        )
+        runner.run(job_id=job_id)
+
+    with session_scope(engine) as session:
+        saved = JobRepository(session).get(job_id)
+        assert saved.status == "failed"
+        assert saved.error_message == "gpu unavailable"
+        assert saved.result_dir is None
+        assert saved.result_zip_path is None
+
+
+class _DummyGpuGate:
+    def acquire(self):
+        return self
+
+    def __enter__(self):
+        return None
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
