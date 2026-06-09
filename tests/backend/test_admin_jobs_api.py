@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.api.routes.admin_jobs import cancel_job, list_jobs, retry_job
+from backend.api.routes.admin_jobs import cancel_job, download_job_result, get_job_detail, list_jobs, retry_job
 from backend.core.db import build_engine, create_all, session_scope
 from backend.db.models import JobRecord
 from backend.main import app
@@ -28,6 +28,55 @@ def test_admin_can_list_jobs(tmp_path: Path) -> None:
     assert [job.job_code for job in jobs] == ["JOB-001", "JOB-002"]
     assert jobs[0].status == "created"
     assert jobs[1].mode == "advanced"
+    assert jobs[0].progress == 5
+    assert jobs[0].download_ready is False
+
+
+def test_admin_can_get_job_detail_with_events_and_download_state(tmp_path: Path) -> None:
+    result_zip = tmp_path / "result.zip"
+    result_zip.write_bytes(b"zip-bytes")
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with session_scope(engine) as session:
+        repo = JobRepository(session)
+        job = repo.create_job(job_code="JOB-DONE", access_token_hash="hash", mode="advanced")
+        repo.record_event(
+            job.id,
+            event_type="completed",
+            message="输出结果压缩包已生成",
+            payload_json={"total": 2, "written": 2, "path": "/data/private/result.zip"},
+        )
+        repo.mark_completed(job.id, result_dir=str(tmp_path), result_zip_path=str(result_zip))
+        job_id = job.id
+
+    detail = get_job_detail(job_id, admin=ADMIN_CLAIMS, service=service)
+
+    assert detail.job_code == "JOB-DONE"
+    assert detail.progress == 100
+    assert detail.download_ready is True
+    assert detail.result_zip_available is True
+    assert detail.events[0].message == "输出结果压缩包已生成"
+    assert detail.events[0].payload_json == {"total": 2, "written": 2}
+
+
+def test_admin_can_download_completed_job_result(tmp_path: Path) -> None:
+    result_zip = tmp_path / "result.zip"
+    result_zip.write_bytes(b"zip-bytes")
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with session_scope(engine) as session:
+        repo = JobRepository(session)
+        job = repo.create_job(job_code="JOB-DONE", access_token_hash="hash", mode="advanced")
+        repo.mark_completed(job.id, result_dir=str(tmp_path), result_zip_path=str(result_zip))
+        job_id = job.id
+
+    response = download_job_result(job_id, admin=ADMIN_CLAIMS, service=service)
+
+    assert Path(response.path) == result_zip
 
 
 def test_admin_can_cancel_queued_job(tmp_path: Path) -> None:
@@ -109,3 +158,7 @@ def test_openapi_contains_admin_job_routes() -> None:
     assert "post" in schema["paths"]["/api/admin/jobs/{job_id}/cancel"]
     assert "/api/admin/jobs/{job_id}/retry" in schema["paths"]
     assert "post" in schema["paths"]["/api/admin/jobs/{job_id}/retry"]
+    assert "/api/admin/jobs/{job_id}" in schema["paths"]
+    assert "get" in schema["paths"]["/api/admin/jobs/{job_id}"]
+    assert "/api/admin/jobs/{job_id}/download" in schema["paths"]
+    assert "get" in schema["paths"]["/api/admin/jobs/{job_id}/download"]

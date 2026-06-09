@@ -41,6 +41,15 @@ class JobRepository:
     def list_jobs(self) -> list[JobRecord]:
         return self.session.query(JobRecord).order_by(JobRecord.id.asc()).all()
 
+    def list_events(self, job_id: int) -> list[JobEventRecord]:
+        self._get_required(job_id)
+        return (
+            self.session.query(JobEventRecord)
+            .filter_by(job_id=job_id)
+            .order_by(JobEventRecord.id.asc())
+            .all()
+        )
+
     def mark_uploaded(self, job_id: int, *, input_path: str) -> JobRecord:
         job = self._get_required(job_id)
         job.status = "uploaded"

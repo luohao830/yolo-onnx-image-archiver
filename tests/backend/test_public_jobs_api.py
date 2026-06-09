@@ -9,7 +9,7 @@ from backend.db.models import JobRecord, ModelRecord
 from backend.main import app
 from backend.repositories.jobs import JobRepository
 
-from backend.api.routes.public_jobs import create_job, get_job, list_published_models
+from backend.api.routes.public_jobs import create_job, download_job_result, get_job, list_published_models
 from backend.schemas.jobs import CreateJobRequest
 from backend.services.job_service import JobService, get_job_service
 from backend.services.model_service import ModelService
@@ -48,6 +48,62 @@ def test_get_public_job_returns_status_when_token_matches(tmp_path: Path) -> Non
     assert payload.error_message is None
 
 
+def test_get_public_job_returns_progress_events_and_download_state(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
+
+    with session_scope(engine) as session:
+        repo = JobRepository(session)
+        saved = repo.get_by_code(receipt.job_code)
+        assert saved is not None
+        repo.mark_running(saved.id)
+        repo.record_event(
+            saved.id,
+            event_type="running",
+            message="任务开始执行",
+            payload_json={
+                "total": 10,
+                "written": 4,
+                "path": "/data/private/JOB-1",
+            },
+        )
+
+    payload = get_job(receipt.job_code, receipt.access_token, service=service)
+
+    assert payload.progress == 40
+    assert payload.download_ready is False
+    assert len(payload.events) == 1
+    assert payload.events[0].event_type == "running"
+    assert payload.events[0].message == "任务开始执行"
+    assert payload.events[0].payload_json == {"total": 10, "written": 4}
+
+
+def test_download_public_job_result_requires_completed_job_and_token(tmp_path: Path) -> None:
+    result_zip = tmp_path / "result.zip"
+    result_zip.write_bytes(b"zip-bytes")
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
+
+    with session_scope(engine) as session:
+        repo = JobRepository(session)
+        saved = repo.get_by_code(receipt.job_code)
+        assert saved is not None
+        repo.mark_completed(saved.id, result_dir=str(tmp_path), result_zip_path=str(result_zip))
+
+    response = download_job_result(receipt.job_code, receipt.access_token, service=service)
+
+    assert Path(response.path) == result_zip
+
+    with pytest.raises(HTTPException) as bad_token_error:
+        download_job_result(receipt.job_code, "bad-token", service=service)
+
+    assert bad_token_error.value.status_code == 404
+
+
 def test_get_public_job_raises_404_for_bad_or_missing_access_token(tmp_path: Path) -> None:
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
@@ -75,6 +131,8 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "get" in schema["paths"]["/api/jobs/models"]
     assert "/api/jobs/{job_code}" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}"]
+    assert "/api/jobs/{job_code}/download" in schema["paths"]
+    assert "get" in schema["paths"]["/api/jobs/{job_code}/download"]
 
 
 def test_list_published_models_only_returns_enabled_advanced_models(tmp_path: Path) -> None:
