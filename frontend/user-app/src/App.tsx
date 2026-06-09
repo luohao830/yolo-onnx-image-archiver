@@ -1,18 +1,13 @@
-import { Link, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
+
+import { HomePage } from "./pages/HomePage";
+import { PersonFilterPage } from "./pages/PersonFilterPage";
 
 export function App() {
   return (
     <Routes>
-      <Route
-        path="/"
-        element={
-          <main>
-            <h1>图片任务平台</h1>
-            <Link to="/person-filter">人员筛选模式</Link>
-            <Link to="/advanced">高级模式</Link>
-          </main>
-        }
-      />
+      <Route path="/" element={<HomePage />} />
+      <Route path="/person-filter" element={<PersonFilterPage />} />
     </Routes>
   );
 }
