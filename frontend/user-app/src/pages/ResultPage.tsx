@@ -38,6 +38,12 @@ export function ResultPage(props: ResultPageProps) {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
+    function scheduleNextPoll() {
+      timer = setTimeout(() => {
+        void pollStatus();
+      }, POLL_INTERVAL_MS);
+    }
+
     async function pollStatus() {
       setIsLoading(true);
 
@@ -52,9 +58,7 @@ export function ResultPage(props: ResultPageProps) {
         setErrorMessage(null);
 
         if (!isTerminalStatus(nextStatus.status)) {
-          timer = setTimeout(() => {
-            void pollStatus();
-          }, POLL_INTERVAL_MS);
+          scheduleNextPoll();
         }
       } catch (error) {
         if (stopped) {
@@ -62,6 +66,7 @@ export function ResultPage(props: ResultPageProps) {
         }
 
         setErrorMessage(error instanceof Error ? error.message : "获取任务状态失败");
+        scheduleNextPoll();
       } finally {
         if (!stopped) {
           setIsLoading(false);

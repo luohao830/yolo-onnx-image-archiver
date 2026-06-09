@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -15,6 +15,7 @@ describe("ResultPage", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
     vi.clearAllMocks();
@@ -82,5 +83,52 @@ describe("ResultPage", () => {
 
     await vi.advanceTimersByTimeAsync(4000);
     expect(getJobStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling after a transient error and eventually stops at completed", async () => {
+    vi.mocked(getJobStatus)
+      .mockResolvedValueOnce({
+        job_code: "JOB-201",
+        mode: "person_filter",
+        status: "running"
+      })
+      .mockRejectedValueOnce(new Error("network unstable"))
+      .mockResolvedValueOnce({
+        job_code: "JOB-201",
+        mode: "person_filter",
+        status: "completed"
+      });
+
+    render(
+      <MemoryRouter initialEntries={["/results/JOB-201?access_token=token-201"]}>
+        <Routes>
+          <Route path="/results/:jobCode" element={<ResultPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(getJobStatus).toHaveBeenCalledWith("JOB-201", "token-201");
+      expect(screen.getByText("running")).toBeTruthy();
+    });
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    await waitFor(() => {
+      expect(getJobStatus).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("alert").textContent).toBe("network unstable");
+      expect(screen.getByText("running")).toBeTruthy();
+    });
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    await waitFor(() => {
+      expect(getJobStatus).toHaveBeenCalledTimes(3);
+      expect(screen.getByText("completed")).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(getJobStatus).toHaveBeenCalledTimes(3);
   });
 });
