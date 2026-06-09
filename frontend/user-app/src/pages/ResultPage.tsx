@@ -12,7 +12,7 @@ export interface ResultPageProps {
 }
 
 function isTerminalStatus(status: JobStatus): boolean {
-  return status === "completed" || status === "failed";
+  return status === "completed" || status === "failed" || status === "canceled";
 }
 
 export function ResultPage(props: ResultPageProps) {
@@ -87,7 +87,7 @@ export function ResultPage(props: ResultPageProps) {
   return (
     <main>
       <h1>任务结果</h1>
-      <p>系统会定时刷新任务状态，直到任务完成或失败。</p>
+      <p>系统会定时刷新任务状态，直到任务完成、失败或取消。</p>
       <p>任务编号：{jobCode || "未提供"}</p>
       {!result && isLoading ? <p>正在获取最新状态...</p> : null}
       {errorMessage ? <p role="alert">{errorMessage}</p> : null}
@@ -103,6 +103,9 @@ export function ResultPage(props: ResultPageProps) {
           ) : null}
           {result.status === "failed" && result.error_message ? (
             <p role="alert">{result.error_message}</p>
+          ) : null}
+          {result.status === "canceled" ? (
+            <p>任务已取消，不会继续处理。</p>
           ) : null}
         </section>
       ) : null}

@@ -5,12 +5,13 @@ const STATUS_STEPS: Array<{ status: JobStatus; label: string }> = [
   { status: "uploaded", label: "文件已接收" },
   { status: "running", label: "正在处理" },
   { status: "completed", label: "处理完成" },
-  { status: "failed", label: "处理失败" }
+  { status: "failed", label: "处理失败" },
+  { status: "canceled", label: "任务已取消" }
 ];
 
 function getStepState(currentStatus: JobStatus, stepStatus: JobStatus): string {
-  if (currentStatus === "failed") {
-    if (stepStatus === "failed") {
+  if (currentStatus === "failed" || currentStatus === "canceled") {
+    if (stepStatus === currentStatus) {
       return "current";
     }
 
