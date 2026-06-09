@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="YOLO_PLATFORM_", extra="ignore")
     runtime_root: Path = PROJECT_ROOT / "runtime"
     database_url: str | None = None
+    admin_secret: str = "dev-secret"
+    admin_token_secret: str | None = None
+    admin_token_ttl_seconds: int = 3600
 
     def resolve_runtime_root(self) -> Path:
         if self.runtime_root.is_absolute():
@@ -21,6 +24,9 @@ class Settings(BaseSettings):
         if self.database_url:
             return self.database_url
         return f"sqlite:///{(self.resolve_runtime_root() / 'app.db').resolve()}"
+
+    def resolve_admin_token_secret(self) -> str:
+        return self.admin_token_secret or self.admin_secret
 
 
 settings = Settings()
