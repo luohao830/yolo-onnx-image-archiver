@@ -20,3 +20,8 @@ class PublicJobStatus(BaseModel):
     mode: str
     status: str
     error_message: str | None = None
+
+
+class PublishedModel(BaseModel):
+    id: str
+    name: str
