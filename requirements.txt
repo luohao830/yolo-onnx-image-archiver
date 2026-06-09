@@ -6,3 +6,4 @@ fastapi
 uvicorn
 sqlalchemy
 pydantic-settings
+itsdangerous
