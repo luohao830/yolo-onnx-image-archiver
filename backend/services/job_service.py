@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import secrets
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Mapping
 
 from sqlalchemy.engine import Engine
@@ -66,9 +67,9 @@ class JobService:
         self.engine = engine
 
     def create_public_job(self, mode: str) -> dict[str, str]:
+        payload_json = self._build_payload_for_mode(mode)
         access_token = self._generate_access_token()
         access_token_hash = self._hash_access_token(access_token)
-        payload_json = self._build_payload_for_mode(mode)
 
         with session_scope(self.engine) as session:
             repo = JobRepository(session)
@@ -113,7 +114,9 @@ class JobService:
     def _build_payload_for_mode(self, mode: str) -> dict[str, Any]:
         if mode == "person_filter":
             return normalize_job_payload(PERSON_FILTER_PAYLOAD)
-        return normalize_job_payload(None)
+        if mode == "advanced":
+            return normalize_job_payload(None)
+        raise ValueError(f"unsupported job mode: {mode}")
 
     @staticmethod
     def _generate_access_token() -> str:
@@ -133,7 +136,11 @@ class JobService:
 
 @lru_cache(maxsize=1)
 def get_job_service() -> JobService:
-    settings.runtime_root.mkdir(parents=True, exist_ok=True)
-    engine = build_engine(settings.resolve_database_url())
+    database_url = settings.resolve_database_url()
+    if database_url.startswith("sqlite:///"):
+        database_path = Path(database_url.removeprefix("sqlite:///"))
+        if database_path != Path(":memory:"):
+            database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = build_engine(database_url)
     create_all(engine)
     return JobService(engine)
