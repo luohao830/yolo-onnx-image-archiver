@@ -112,6 +112,26 @@ http://localhost:7860
 - `IMAGES_DIR=/data/images`
 - `MODELS_DIR=/data/models`
 
+## Backend Dev
+
+如果你正在开发多用户平台的后端内核，可以直接在仓库根目录运行：
+
+```bash
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+python -m pytest tests/backend -v
+```
+
+健康检查接口：
+
+```text
+http://127.0.0.1:8000/api/healthz
+```
+
+当前阶段的后端实现和验证范围只包含：
+
+- `backend/`
+- `tests/backend/`
+
 ## 类别文件 sidecar
 
 自训练模型建议提供同名类别文件，WebUI 会用于展示类别筛选项和输出目录名称。
