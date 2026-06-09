@@ -70,8 +70,21 @@ export async function getJobStatus(
   );
 
   if (!response.ok) {
-    throw new Error(`get job status failed: ${response.status}`);
+    throw new Error(await readErrorMessage(response, `get job status failed: ${response.status}`));
   }
 
   return response.json() as Promise<PublicJobStatus>;
+}
+
+async function readErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
+  try {
+    const payload = (await response.json()) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    // Ignore non-JSON error bodies and fall back to status text below.
+  }
+
+  return response.statusText || fallbackMessage;
 }
