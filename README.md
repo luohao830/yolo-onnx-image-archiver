@@ -4,13 +4,13 @@
 
 ## 当前能力
 
-- `backend/`：FastAPI API 服务，提供公开任务凭证、管理员登录、模型管理、并发配置、任务监控、取消与重试接口。
-- `frontend/user-app/`：匿名用户前台，包含首页、人员筛选入口、高级模式入口、任务查询页和结果轮询页。
+- `backend/`：FastAPI API 服务，提供公开任务创建、状态/日志查询、结果下载、管理员登录、模型管理、并发配置、任务监控、详情、取消、重试与下载接口。
+- `frontend/user-app/`：匿名用户前台，包含首页、人员筛选入口、高级模式入口和任务进度/关键日志/结果下载视图。
 - `frontend/admin-app/`：管理员后台，包含密钥登录、模型管理、系统配置和任务监控页面。
 - `gateway/`：Nginx 统一入口，将用户前台、管理员后台和 `/api/` 转发到同一端口。
 - `webui/`：旧版 Gradio 工具链与 `webui.processing.run_inference` 推理实现，后端 `TaskRunner` 通过适配层复用它。
 
-当前阶段已经打通任务创建与状态查询的基础链路，但公开前台的文件上传、任务入队执行和结果下载按钮尚未接入 API。`backend/services/archive_ingest.py`、`backend/workers/scheduler.py` 和 `backend/workers/task_runner.py` 已有基础实现与单元测试，后续需要把它们串入公开任务流程。
+当前阶段已经打通任务创建、状态/关键日志查询和已完成任务结果下载的基础链路，但公开前台的文件上传和任务入队执行尚未接入 API。`backend/services/archive_ingest.py`、`backend/workers/scheduler.py` 和 `backend/workers/task_runner.py` 已有基础实现与单元测试，后续需要把它们串入公开任务流程。
 
 ## 目录结构
 
@@ -171,7 +171,7 @@ dev-secret
 - `task_slots`：任务并发槽位，范围 `1` 到 `3`
 - `gpu_slots`：GPU 推理槽位，范围 `1` 到 `3`
 
-任务监控页当前支持查看任务、取消任务和重试失败任务。
+任务监控页当前支持查看任务列表、查看单个任务详情与关键日志、下载已完成任务输出、取消任务和重试失败任务。
 
 ## API 摘要
 
@@ -180,6 +180,7 @@ dev-secret
 - `GET /api/healthz`
 - `POST /api/jobs`
 - `GET /api/jobs/{job_code}?access_token=...`
+- `GET /api/jobs/{job_code}/download?access_token=...`
 - `GET /api/jobs/models`
 
 管理员接口：
@@ -191,6 +192,8 @@ dev-secret
 - `GET /api/admin/configs`
 - `PUT /api/admin/configs/concurrency`
 - `GET /api/admin/jobs`
+- `GET /api/admin/jobs/{job_id}`
+- `GET /api/admin/jobs/{job_id}/download`
 - `POST /api/admin/jobs/{job_id}/cancel`
 - `POST /api/admin/jobs/{job_id}/retry`
 
@@ -229,4 +232,4 @@ cd ../admin-app && npm run build
 - `webui/` 仍可用于旧工具链调试，后端推理适配层继续复用 `webui.processing`。
 - 当前 Compose 不再启动 MongoDB，也不使用 `fo_data/`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如部署环境需要固定 GPU，请在 `backend.deploy.resources.reservations.devices` 中配置 `device_ids`。
-- 公开前台目前只创建任务并返回凭证；文件上传、调度入队、结果下载还需要后续接入。
+- 公开前台目前可创建任务、轮询进度/关键日志，并在任务已完成且结果包存在时下载压缩包；文件上传和调度入队还需要后续接入。
