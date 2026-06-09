@@ -77,6 +77,4 @@ class TaskRunner:
         )
 
     def _record_event(self, job_id: int, event: dict[str, Any]) -> None:
-        record_event = getattr(self.job_repo, "record_event", None)
-        if callable(record_event):
-            record_event(job_id, **event)
+        self.job_repo.record_event(job_id, **event)

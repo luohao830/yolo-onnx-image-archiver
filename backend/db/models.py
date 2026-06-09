@@ -29,3 +29,13 @@ class ModelRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     onnx_path: Mapped[str] = mapped_column(Text())
+
+
+class JobEventRecord(Base):
+    __tablename__ = "job_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(index=True)
+    event_type: Mapped[str] = mapped_column(String(32))
+    message: Mapped[str] = mapped_column(Text())
+    payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

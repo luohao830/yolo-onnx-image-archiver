@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from backend.db.models import JobRecord
+from backend.db.models import JobEventRecord, JobRecord
 
 
 class JobRepository:
@@ -73,6 +73,25 @@ class JobRepository:
         job.error_message = error_message
         self.session.flush()
         return job
+
+    def record_event(
+        self,
+        job_id: int,
+        *,
+        event_type: str,
+        message: str,
+        payload_json: dict[str, Any] | None = None,
+    ) -> JobEventRecord:
+        self._get_required(job_id)
+        event = JobEventRecord(
+            job_id=job_id,
+            event_type=event_type,
+            message=message,
+            payload_json=payload_json,
+        )
+        self.session.add(event)
+        self.session.flush()
+        return event
 
     def _get_required(self, job_id: int) -> JobRecord:
         job = self.session.get(JobRecord, job_id)
