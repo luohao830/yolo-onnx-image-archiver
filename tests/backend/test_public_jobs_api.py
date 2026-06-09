@@ -3,13 +3,15 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
+from backend.core.config import Settings, settings
 from backend.core.db import build_engine, create_all, session_scope
+from backend.db.models import JobRecord
 from backend.main import app
 from backend.repositories.jobs import JobRepository
 
 from backend.api.routes.public_jobs import create_job, get_job
 from backend.schemas.jobs import CreateJobRequest
-from backend.services.job_service import JobService
+from backend.services.job_service import JobService, get_job_service
 
 
 def test_create_public_job_returns_receipt_and_persists_job(tmp_path: Path) -> None:
@@ -70,3 +72,48 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "201" in schema["paths"]["/api/jobs"]["post"]["responses"]
     assert "/api/jobs/{job_code}" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}"]
+
+
+def test_settings_default_database_url_is_stable_across_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    original_url = Settings().resolve_database_url()
+
+    monkeypatch.chdir(tmp_path)
+
+    changed_url = Settings().resolve_database_url()
+
+    assert changed_url == original_url
+
+
+def test_get_job_service_uses_runtime_root_database_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_root = tmp_path / "runtime-root"
+    original_runtime_root = settings.runtime_root
+    original_database_url = settings.database_url
+    get_job_service.cache_clear()
+    monkeypatch.setattr(settings, "runtime_root", runtime_root)
+    monkeypatch.setattr(settings, "database_url", None)
+
+    try:
+        service = get_job_service()
+        expected_db_path = (runtime_root / "app.db").resolve()
+
+        assert Path(service.engine.url.database) == expected_db_path
+        assert expected_db_path.exists()
+    finally:
+        get_job_service.cache_clear()
+        settings.runtime_root = original_runtime_root
+        settings.database_url = original_database_url
+
+
+def test_job_service_rejects_invalid_mode_without_persisting(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with pytest.raises(ValueError, match="unsupported job mode"):
+        service.create_public_job("unsupported")
+
+    with session_scope(engine) as session:
+        assert session.query(JobRecord).count() == 0
