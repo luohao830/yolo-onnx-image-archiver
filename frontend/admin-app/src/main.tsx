@@ -11,6 +11,7 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <BrowserRouter
+    basename={import.meta.env.BASE_URL}
     future={{
       v7_startTransition: true,
       v7_relativeSplatPath: true

@@ -21,6 +21,7 @@ images/*
 !images/output/.gitkeep
 
 models/*.onnx
+runtime/
 *.zip
 *.tar
 *.tar.gz

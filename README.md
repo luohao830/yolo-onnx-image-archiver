@@ -59,22 +59,57 @@ http://127.0.0.1:5174
 
 同样可通过 Vite 代理访问本地后端 API。
 
-## API 服务
+## Docker Compose 完整启动
 
-默认容器入口已经切换为 FastAPI：
+当前 `docker compose` 会同时启动以下 4 个容器：
+
+- `backend`：FastAPI 后端
+- `user-app`：匿名用户前台静态站点
+- `admin-app`：管理员后台静态站点
+- `gateway`：统一入口 Nginx 反向代理
+
+启动前建议先准备运行目录：
+
+```bash
+mkdir -p models runtime
+```
+
+如果你的机器只有一张 GPU，请确认 [docker-compose.yml](/root/code/0604-yolov5/.worktrees/public-multi-user-platform/docker-compose.yml:10) 中的 `device_ids` 已设置为正确值，例如 `"0"`。
+
+然后执行：
 
 ```bash
 docker compose build
 docker compose up -d
 ```
 
-默认 API 地址：
+查看状态与日志：
+
+```bash
+docker compose ps
+docker compose logs -f gateway
+docker compose logs -f backend
+```
+
+统一入口地址：
 
 ```text
 http://127.0.0.1:58000
 ```
 
-关键接口：
+路由分发如下：
+
+- `http://127.0.0.1:58000/`：用户前台
+- `http://127.0.0.1:58000/admin/`：管理员后台
+- `http://127.0.0.1:58000/api/...`：后端 API
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:58000/api/healthz
+```
+
+关键接口包括：
 
 - `GET /api/healthz`
 - `POST /api/jobs`
@@ -83,6 +118,14 @@ http://127.0.0.1:58000
 - `GET /api/admin/models`
 - `GET /api/admin/configs`
 - `GET /api/admin/jobs`
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+## API 服务
 
 本地后端开发：
 
@@ -108,10 +151,11 @@ python -m pytest tests/backend -v
 当前推荐流程如下：
 
 1. 将 `.onnx` 模型及可选 sidecar 文件放入 `models/`
-2. 启动后端服务
-3. 通过管理员后台登录
-4. 在模型管理页创建模型记录并发布
-5. 将某个 `person_detector` 模型设为默认人检模型
+2. 运行 `docker compose up -d`
+3. 访问 `http://127.0.0.1:58000/admin/`
+4. 使用管理员密钥 `dev-secret` 登录
+5. 在模型管理页创建模型记录并发布
+6. 将某个 `person_detector` 模型设为默认人检模型
 
 当前版本已经打通模型记录、发布状态、默认人检模型和高级模式可见性的管理接口；模型文件上传本身仍以本地目录投放为主，后续再接入后台上传。
 
@@ -132,4 +176,4 @@ python -m pytest tests/backend -v
 
 - `webui/` 仍可作为旧工具链和推理调试入口
 - 默认 Docker 入口已不再启动 Gradio
-- 管理员与匿名用户前端目前以独立开发站点运行，尚未做容器内静态托管整合
+- 当前 `docker compose` 已支持将用户前台、管理员后台和后端 API 统一到单端口入口
