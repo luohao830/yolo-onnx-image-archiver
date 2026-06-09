@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 
 import { AdvancedModePage } from "./pages/AdvancedModePage";
 import { HomePage } from "./pages/HomePage";
+import { LookupPage } from "./pages/LookupPage";
 import { PersonFilterPage } from "./pages/PersonFilterPage";
 
 export function App() {
@@ -10,6 +11,7 @@ export function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/person-filter" element={<PersonFilterPage />} />
       <Route path="/advanced" element={<AdvancedModePage />} />
+      <Route path="/lookup" element={<LookupPage />} />
     </Routes>
   );
 }
