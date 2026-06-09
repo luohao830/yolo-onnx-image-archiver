@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -13,7 +14,7 @@ MAX_EXTRACTED_TOTAL_BYTES = 1024 * 1024 * 1024
 
 
 def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
     resolved_out_dir = out_dir.resolve()
     members: list[tuple[zipfile.ZipInfo, Path]] = []
     total_bytes = 0
@@ -34,12 +35,20 @@ def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
             if total_bytes > MAX_EXTRACTED_TOTAL_BYTES:
                 raise ValueError("压缩包解压总大小超限")
 
-        extracted: list[Path] = []
-        for info, target in members:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(info) as src, target.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
-            extracted.append(target)
+    temp_out_dir = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}-", dir=out_dir.parent))
+    extracted = [out_dir / target.relative_to(resolved_out_dir) for _, target in members]
+
+    try:
+        with zipfile.ZipFile(archive_path) as zf:
+            for info, target in members:
+                temp_target = temp_out_dir / target.relative_to(resolved_out_dir)
+                temp_target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, temp_target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        _replace_output_dir(temp_out_dir, out_dir)
+    except Exception:
+        shutil.rmtree(temp_out_dir, ignore_errors=True)
+        raise
 
     return extracted
 
@@ -58,3 +67,13 @@ def _resolve_member_path(out_dir: Path, filename: str) -> Path:
         raise ValueError("非法压缩包路径") from exc
 
     return target
+
+
+def _replace_output_dir(temp_out_dir: Path, out_dir: Path) -> None:
+    if out_dir.exists():
+        if not out_dir.is_dir():
+            raise ValueError("输出目录必须是目录")
+        if any(out_dir.iterdir()):
+            raise ValueError("输出目录必须为空")
+        out_dir.rmdir()
+    temp_out_dir.replace(out_dir)
