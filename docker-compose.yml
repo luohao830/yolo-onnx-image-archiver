@@ -12,6 +12,14 @@ services:
       - ./webui:/app/webui
     environment:
       - MODELS_DIR=/data/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities:
+                - gpu
     expose:
       - "8000"
 

@@ -38,6 +38,12 @@
 mkdir -p models runtime
 ```
 
+后端容器默认申请宿主机全部 NVIDIA GPU。宿主机需要已安装 NVIDIA 驱动和 NVIDIA Container Toolkit，并确保以下命令能看到 GPU：
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 nvidia-smi
+```
+
 构建并启动：
 
 ```bash
@@ -72,6 +78,17 @@ docker compose logs -f backend
 docker compose logs -f gateway
 docker compose down
 ```
+
+GPU 验证：
+
+```bash
+docker compose exec backend nvidia-smi
+docker compose exec backend python3 -c "import onnxruntime as ort; print(ort.get_available_providers())"
+```
+
+`onnxruntime` 输出应包含 `CUDAExecutionProvider`。如需固定使用特定 GPU，可在 `docker-compose.yml` 的 `backend.deploy.resources.reservations.devices` 中将 `count: all` 改为 `device_ids: ["0"]`，不要同时设置 `count` 和 `device_ids`。
+
+如果启动后端容器时报 `could not select device driver "nvidia" with capabilities: [[gpu]]`，说明 Docker daemon 尚未注册 NVIDIA runtime。先安装/配置 NVIDIA Container Toolkit 并重启 Docker，再重新执行 `docker compose up -d`。
 
 健康检查：
 
@@ -130,7 +147,7 @@ http://127.0.0.1:5174
 | `YOLO_PLATFORM_ADMIN_TOKEN_SECRET` | 同 `YOLO_PLATFORM_ADMIN_SECRET` | 管理员 token 签名密钥 |
 | `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS` | `3600` | 管理员 token 有效期 |
 
-Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路使用。通过管理员后台创建模型记录时，容器内推荐填写 `/data/models/<model>.onnx` 形式的模型路径。
+Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路使用，并通过 Compose GPU reservation 向后端容器暴露 NVIDIA GPU。通过管理员后台创建模型记录时，容器内推荐填写 `/data/models/<model>.onnx` 形式的模型路径。
 
 ## 管理员后台
 
@@ -211,5 +228,5 @@ cd ../admin-app && npm run build
 - 默认 Docker 入口已经切换为 FastAPI 后端，不再启动 Gradio。
 - `webui/` 仍可用于旧工具链调试，后端推理适配层继续复用 `webui.processing`。
 - 当前 Compose 不再启动 MongoDB，也不使用 `fo_data/`。
-- 当前 Compose 文件没有显式声明 GPU `device_ids`；如部署环境需要固定 GPU，请结合 Docker / NVIDIA Container Toolkit 在运行环境中配置。
+- Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如部署环境需要固定 GPU，请在 `backend.deploy.resources.reservations.devices` 中配置 `device_ids`。
 - 公开前台目前只创建任务并返回凭证；文件上传、调度入队、结果下载还需要后续接入。

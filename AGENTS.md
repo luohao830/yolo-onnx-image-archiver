@@ -38,7 +38,7 @@
 - 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET` 和 `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`。
 - 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`，管理员后台创建模型记录时应填写容器内路径，例如 `/data/models/person.onnx`。
-- 当前 Compose 文件没有显式声明 GPU `device_ids`；如需固定 GPU，通过 Docker / NVIDIA Container Toolkit 或 Compose 扩展配置处理。
+- Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 
 ## 编码风格与命名
