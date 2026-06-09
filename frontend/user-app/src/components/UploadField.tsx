@@ -21,7 +21,7 @@ export function UploadField({
   }
 
   return (
-    <div>
+    <div className="upload-field">
       <label htmlFor={id}>{label}</label>
       <input id={id} type="file" accept={accept} onChange={handleChange} />
       {selectedFile ? <p>已选择：{selectedFile.name}</p> : null}

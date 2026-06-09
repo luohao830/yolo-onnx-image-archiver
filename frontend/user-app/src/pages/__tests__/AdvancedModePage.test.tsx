@@ -5,6 +5,9 @@ import { listPublishedModels } from "../../api/client";
 import { AdvancedModePage } from "../AdvancedModePage";
 
 vi.mock("../../api/client", () => ({
+  buildJobDownloadUrl: vi.fn(),
+  createJob: vi.fn(),
+  getJobStatus: vi.fn(),
   listPublishedModels: vi.fn()
 }));
 
@@ -20,7 +23,8 @@ describe("AdvancedModePage", () => {
     render(<AdvancedModePage />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "高级模式" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "选择模型并查看处理过程" })).toBeTruthy();
+      expect(screen.getByText("高级模式")).toBeTruthy();
       expect(screen.getByLabelText("选择模型")).toBeTruthy();
       expect(screen.getByText("helmet-person-v1")).toBeTruthy();
       expect(screen.getByLabelText("置信度阈值")).toBeTruthy();
