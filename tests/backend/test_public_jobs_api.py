@@ -5,13 +5,14 @@ from fastapi import HTTPException
 
 from backend.core.config import Settings, settings
 from backend.core.db import build_engine, create_all, session_scope
-from backend.db.models import JobRecord
+from backend.db.models import JobRecord, ModelRecord
 from backend.main import app
 from backend.repositories.jobs import JobRepository
 
-from backend.api.routes.public_jobs import create_job, get_job
+from backend.api.routes.public_jobs import create_job, get_job, list_published_models
 from backend.schemas.jobs import CreateJobRequest
 from backend.services.job_service import JobService, get_job_service
+from backend.services.model_service import ModelService
 
 
 def test_create_public_job_returns_receipt_and_persists_job(tmp_path: Path) -> None:
@@ -70,8 +71,51 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "/api/jobs" in schema["paths"]
     assert "post" in schema["paths"]["/api/jobs"]
     assert "201" in schema["paths"]["/api/jobs"]["post"]["responses"]
+    assert "/api/jobs/models" in schema["paths"]
+    assert "get" in schema["paths"]["/api/jobs/models"]
     assert "/api/jobs/{job_code}" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}"]
+
+
+def test_list_published_models_only_returns_enabled_advanced_models(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+
+    with session_scope(engine) as session:
+        session.add_all(
+            [
+                ModelRecord(
+                    name="helmet-person-v1",
+                    slug="helmet-person-v1",
+                    onnx_path="models/helmet-person-v1.onnx",
+                    model_kind="person_detector",
+                    enabled=True,
+                    visible_in_advanced_mode=True,
+                ),
+                ModelRecord(
+                    name="hidden-model",
+                    slug="hidden-model",
+                    onnx_path="models/hidden-model.onnx",
+                    model_kind="person_detector",
+                    enabled=True,
+                    visible_in_advanced_mode=False,
+                ),
+                ModelRecord(
+                    name="disabled-model",
+                    slug="disabled-model",
+                    onnx_path="models/disabled-model.onnx",
+                    model_kind="person_detector",
+                    enabled=False,
+                    visible_in_advanced_mode=True,
+                ),
+            ]
+        )
+
+    payload = list_published_models(service=ModelService(engine))
+
+    assert len(payload) == 1
+    assert payload[0].id == "1"
+    assert payload[0].name == "helmet-person-v1"
 
 
 def test_settings_default_database_url_is_stable_across_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

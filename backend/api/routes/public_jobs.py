@@ -4,8 +4,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.schemas.jobs import CreateJobRequest, JobReceipt, PublicJobStatus
+from backend.schemas.jobs import CreateJobRequest, JobReceipt, PublicJobStatus, PublishedModel
 from backend.services.job_service import JobService, get_job_service
+from backend.services.model_service import ModelService, get_model_service
 
 
 router = APIRouter(prefix="/jobs", tags=["public-jobs"])
@@ -18,6 +19,13 @@ def create_job(
 ) -> JobReceipt:
     receipt = service.create_public_job(payload.mode)
     return JobReceipt(**receipt)
+
+
+@router.get("/models", response_model=list[PublishedModel])
+def list_published_models(
+    service: Annotated[ModelService, Depends(get_model_service)],
+) -> list[PublishedModel]:
+    return [PublishedModel(**item) for item in service.list_public_models()]
 
 
 @router.get("/{job_code}", response_model=PublicJobStatus)

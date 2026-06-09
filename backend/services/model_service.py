@@ -31,6 +31,18 @@ class ModelService:
             repo = ModelRepository(session)
             return [self._serialize(item) for item in repo.list_models()]
 
+    def list_public_models(self) -> list[dict[str, Any]]:
+        with session_scope(self.engine) as session:
+            repo = ModelRepository(session)
+            return [
+                {
+                    "id": str(item.id),
+                    "name": item.name or item.slug or f"model-{item.id}",
+                }
+                for item in repo.list_models()
+                if item.enabled and item.visible_in_advanced_mode
+            ]
+
     def publish_model(self, model_id: int, payload: Mapping[str, Any]) -> dict[str, Any]:
         with session_scope(self.engine) as session:
             repo = ModelRepository(session)
