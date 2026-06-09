@@ -11,6 +11,7 @@ __pycache__/
 .worktrees/
 node_modules/
 dist/
+*.tsbuildinfo
 
 images/*
 !images/.gitkeep
