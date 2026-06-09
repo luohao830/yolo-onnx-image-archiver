@@ -4,4 +4,5 @@ onnxruntime-gpu
 gradio
 fastapi
 uvicorn
+sqlalchemy
 pydantic-settings
