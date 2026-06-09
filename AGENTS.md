@@ -1,25 +1,64 @@
 # 仓库指南（请注意：此仓库的后续回复一律使用中文）
 
 ## 项目结构与路径
-- 根目录包含 Docker 编排文件（`docker-compose.yml`、`Dockerfile`）以及架构说明文档（`项目架构文档：基于 YOLOv5 与 FiftyOne 的大规模图像检索系统.md`）。
-- 服务挂载目录：`images/`（输入媒资）、`models/`（YOLO 权重）、`fo_data/`（MongoDB 持久化）、`webui/`（Gradio/FiftyOne 代码）、`scripts/`（脚本工具）。请保持这些宿主路径稳定，避免绑定失效。
-- `webui/` 预计包含 `app.py`（UI 入口）、`processing.py`（批量推理与格式化）、`utils.py`（日志/路径辅助），与架构文档保持一致。
+
+- 根目录包含容器编排与后端镜像文件：`docker-compose.yml`、`Dockerfile`、`requirements.txt`。
+- `backend/` 是 FastAPI 后端，包含 API 路由、服务层、仓储层、数据库模型、运行时路径管理和 worker 基础能力。
+- `frontend/user-app/` 是匿名用户前台，使用 Vite + React + TypeScript。
+- `frontend/admin-app/` 是管理员后台，使用 Vite + React + TypeScript；Docker 构建时通过 `VITE_BASE_PATH=/admin/` 适配子路径部署。
+- `gateway/` 保存统一入口 Nginx 配置；Docker Compose 通过 `gateway` 将 `/`、`/admin/` 和 `/api/` 聚合到宿主机 `58000` 端口。
+- `webui/` 是旧版 Gradio 工具链和推理内核，当前不再是默认容器入口，但 `backend/services/inference_adapter.py` 会复用 `webui.processing`。
+- `models/` 保存宿主机模型文件，Docker 后端挂载为 `/data/models`。
+- `runtime/` 是运行时工作区，保存 SQLite 数据库、上传文件、任务目录、结果目录和临时文件；不要提交运行产物。
+- `images/` 主要服务旧版 `webui/` 工作流，当前 Docker Compose 不挂载该目录。
+- `tests/backend/` 保存后端单元测试与 API smoke 测试；前端测试放在各自 `src/**/__tests__/` 附近。
+
+## 当前架构状态
+
+- 主线平台由 `backend`、`user-app`、`admin-app` 和 `gateway` 4 个 Compose 服务组成。
+- 后端默认使用 SQLite，数据库文件位于 `runtime/app.db`；当前没有 MongoDB，也不使用 `fo_data/`。
+- 公开接口已支持创建任务凭证、查询任务状态和列出高级模式可见模型。
+- 管理员接口已支持登录、模型创建/发布、并发配置、任务列表、取消和重试。
+- 公开前台的文件上传、任务入队执行和结果下载按钮尚未接入 API；相关基础能力位于 `archive_ingest.py`、`scheduler.py` 和 `task_runner.py`，修改文档或功能时必须明确这条边界。
 
 ## 构建、运行与开发
-- 构建镜像：`docker-compose build`（已含代理参数）。
-- 无头启动（Mongo + app）：`docker-compose up -d`；停止：`docker-compose down`（数据经挂载目录持久化）。
-- 观察日志：`docker-compose logs -f app`。调试交互 shell：`docker-compose exec app bash`。
-- GPU 绑定默认使用 `docker-compose.yml` 中的设备索引 `1`；如需更换显卡，调整 `deploy.resources.reservations.devices[0].device_ids`。
+
+- Docker 构建：`docker compose build`。
+- Docker 启动：`docker compose up -d`；停止：`docker compose down`。
+- 查看容器状态：`docker compose ps`。
+- 查看日志：`docker compose logs -f backend`、`docker compose logs -f gateway`。
+- 统一入口：`http://127.0.0.1:58000/`。
+- 后端本地开发：`uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`。
+- 用户前台本地开发：在 `frontend/user-app/` 下运行 `npm install`、`npm run dev`。
+- 管理员后台本地开发：在 `frontend/admin-app/` 下运行 `npm install`、`npm run dev`。
+- 两个 Vite 应用都通过开发代理将 `/api` 转发到 `http://127.0.0.1:8000`。
+
+## 配置与运行时约束
+
+- 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET` 和 `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`。
+- 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
+- Docker 后端将宿主机 `models/` 挂载为 `/data/models`，管理员后台创建模型记录时应填写容器内路径，例如 `/data/models/person.onnx`。
+- 当前 Compose 文件没有显式声明 GPU `device_ids`；如需固定 GPU，通过 Docker / NVIDIA Container Toolkit 或 Compose 扩展配置处理。
+- 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 
 ## 编码风格与命名
-- Python 遵循 PEP 8：4 空格缩进，函数/文件用 `snake_case`，类用 `CapWords`，尽量保持函数小而纯。
-- 脚本文件使用动词前缀命名（如 `sync_models.py`、`scan_images.py`），并通过参数传入路径/阈值，避免硬编码。
-- 公共辅助函数请添加简短 docstring；多用日志少用 print，保持 Gradio 输出整洁。
+
+- Python 遵循 PEP 8：4 空格缩进，函数与文件使用 `snake_case`，类使用 `CapWords`。
+- FastAPI 路由保持在 `backend/api/routes/`，依赖注入放在 `backend/api/deps.py`，业务逻辑优先放入 `backend/services/`，数据库访问放入 `backend/repositories/`。
+- 数据库模型集中在 `backend/db/models.py`；新增持久化字段时同步补充仓储、服务和测试。
+- React 组件与页面使用 TypeScript，页面放在 `src/pages/`，通用组件放在 `src/components/`，API 封装放在 `src/api/client.ts`。
+- 公共辅助函数添加简短 docstring 或清晰类型签名；日志优先于 `print`。
+- 避免把新平台逻辑继续塞入旧版 `webui/app.py`；除非是在维护旧 Gradio 调试入口或推理内核。
 
 ## 测试指南
-- 在代码附近添加聚焦测试，如 `webui/tests/test_processing.py` 覆盖 bbox 转换、跳过/覆盖逻辑、基于生成器的批处理。
-- 在容器内运行测试以匹配依赖：`docker-compose exec app pytest /webui/tests`。
-- 如需新增测试依赖，请在 `Dockerfile` 声明以确保镜像可复现。使用位于 `webui/tests/data` 的小型夹具数据，避免全量数据集。
+
+- 后端测试：`python -m pytest tests/backend -v`。
+- 用户前台测试：在 `frontend/user-app/` 下运行 `npm test`。
+- 管理员后台测试：在 `frontend/admin-app/` 下运行 `npm test`。
+- 前端构建验证：分别在 `frontend/user-app/` 和 `frontend/admin-app/` 下运行 `npm run build`。
+- 修改 API 契约时，补充或更新 `tests/backend/test_*_api.py` 与前端 `src/api/client.ts` 附近的调用测试。
+- 修改任务调度、归档解压或推理执行时，优先覆盖 `test_archive_ingest.py`、`test_scheduler.py`、`test_task_runner.py`。
+- 未执行的测试必须在回复、提交说明或 PR 描述中明确标注“未执行”并说明原因，不得编造结果。
 
 ## 提交与 PR 工作规范
 
@@ -104,8 +143,9 @@ PR 描述必须包含以下内容：
 - 说明核心行为变化
 
 ## 测试
-- `pnpm test`：通过 / 失败，失败原因为 ...
-- `pnpm lint`：通过 / 失败，失败原因为 ...
+- `python -m pytest tests/backend -v`：通过 / 失败，失败原因为 ...
+- `npm test`（frontend/user-app）：通过 / 失败，失败原因为 ...
+- `npm test`（frontend/admin-app）：通过 / 失败，失败原因为 ...
 
 ## 端口 / 路径变更
 - 无
@@ -116,8 +156,8 @@ PR 描述必须包含以下内容：
 ```md
 ## 端口 / 路径变更
 - 新增路由：`/api/tasks/:id/retry`
-- 修改配置：`runtime.workers.timeout`
-- 废弃配置：`database.task_timeout_minutes`
+- 修改配置：`YOLO_PLATFORM_RUNTIME_ROOT`
+- 修改挂载：`./runtime:/app/runtime`
 ```
 
 截图或日志要求：
