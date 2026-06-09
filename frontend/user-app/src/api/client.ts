@@ -13,6 +13,13 @@ export interface PublishedModel {
   name: string;
 }
 
+export interface PublicJobStatus {
+  job_code: string;
+  mode: JobMode;
+  status: string;
+  error_message?: string | null;
+}
+
 const DEFAULT_API_BASE_URL = "/api";
 
 function resolveApiBaseUrl(): string {
@@ -49,4 +56,22 @@ export async function listPublishedModels(): Promise<PublishedModel[]> {
   }
 
   return response.json() as Promise<PublishedModel[]>;
+}
+
+export async function getJobStatus(
+  jobCode: string,
+  accessToken: string
+): Promise<PublicJobStatus> {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+  const response = await fetch(
+    `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}?${searchParams.toString()}`
+  );
+
+  if (!response.ok) {
+    throw new Error(`get job status failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<PublicJobStatus>;
 }
