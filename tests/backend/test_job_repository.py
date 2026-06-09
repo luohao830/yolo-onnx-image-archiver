@@ -15,8 +15,23 @@ def test_job_repository_persists_status_transitions(tmp_path: Path) -> None:
             access_token_hash="hash",
             mode="person_filter",
         )
+        assert job.status == "created"
+
+        saved = repo.get_by_code("JOB-001")
+        assert saved is not None
+        assert saved.status == "created"
+
         repo.mark_uploaded(job.id, input_path="runtime/uploads/JOB-001/input.zip")
+        saved = repo.get_by_code("JOB-001")
+        assert saved is not None
+        assert saved.status == "uploaded"
+        assert saved.input_path == "runtime/uploads/JOB-001/input.zip"
+
         repo.mark_running(job.id)
+        saved = repo.get_by_code("JOB-001")
+        assert saved is not None
+        assert saved.status == "running"
+
         repo.mark_completed(
             job.id,
             result_dir="runtime/results/JOB-001",
@@ -26,4 +41,5 @@ def test_job_repository_persists_status_transitions(tmp_path: Path) -> None:
         saved = repo.get_by_code("JOB-001")
         assert saved is not None
         assert saved.status == "completed"
+        assert saved.result_dir == "runtime/results/JOB-001"
         assert saved.result_zip_path.endswith("JOB-001.zip")
