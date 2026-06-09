@@ -32,8 +32,24 @@ export interface AdminJob {
   job_code: string;
   mode: string;
   status: string;
+  progress: number;
   cancel_requested: boolean;
   error_message: string | null;
+  result_zip_available: boolean;
+  download_ready: boolean;
+}
+
+export interface AdminJobEvent {
+  id: number;
+  event_type: string;
+  message: string;
+  payload_json: Record<string, unknown>;
+}
+
+export interface AdminJobDetail extends AdminJob {
+  input_path: string | null;
+  result_dir: string | null;
+  events: AdminJobEvent[];
 }
 
 const DEFAULT_API_BASE_URL = "/api";
@@ -130,6 +146,16 @@ export async function listAdminJobs(): Promise<AdminJob[]> {
   return response.json() as Promise<AdminJob[]>;
 }
 
+export async function getAdminJob(jobId: number): Promise<AdminJobDetail> {
+  const response = await authorizedFetch(`/admin/jobs/${jobId}`);
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `get admin job failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<AdminJobDetail>;
+}
+
 export async function cancelAdminJob(jobId: number): Promise<AdminJob> {
   const response = await authorizedFetch(`/admin/jobs/${jobId}/cancel`, {
     method: "POST"
@@ -152,6 +178,24 @@ export async function retryAdminJob(jobId: number): Promise<AdminJob> {
   }
 
   return response.json() as Promise<AdminJob>;
+}
+
+export async function downloadAdminJobResult(jobId: number): Promise<void> {
+  const response = await authorizedFetch(`/admin/jobs/${jobId}/download`);
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `download admin job result failed: ${response.status}`));
+  }
+
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `job-${jobId}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function getAdminToken(): string {
