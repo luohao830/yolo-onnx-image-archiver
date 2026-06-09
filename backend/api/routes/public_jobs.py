@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import FileResponse
 
 from backend.schemas.jobs import CreateJobRequest, JobReceipt, PublicJobStatus, PublishedModel
 from backend.services.job_service import JobService, get_job_service
@@ -38,3 +39,26 @@ def get_job(
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
     return PublicJobStatus(**job)
+
+
+@router.get("/{job_code}/download")
+def download_job_result(
+    job_code: str,
+    access_token: str,
+    service: Annotated[JobService, Depends(get_job_service)],
+) -> FileResponse:
+    try:
+        result_zip = service.resolve_public_result_zip(job_code, access_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if result_zip is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+
+    return FileResponse(
+        path=result_zip,
+        media_type="application/zip",
+        filename=f"{job_code}.zip",
+    )

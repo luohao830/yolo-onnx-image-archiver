@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -19,9 +19,34 @@ class PublicJobStatus(BaseModel):
     job_code: str
     mode: str
     status: str
+    progress: int
+    events: list["JobEvent"] = []
     error_message: str | None = None
+    download_ready: bool = False
 
 
 class PublishedModel(BaseModel):
     id: str
     name: str
+
+
+class JobEvent(BaseModel):
+    id: int
+    event_type: str
+    message: str
+    payload_json: dict[str, Any] = {}
+
+
+class AdminJobDetail(BaseModel):
+    id: int
+    job_code: str
+    mode: str
+    status: str
+    progress: int
+    cancel_requested: bool
+    error_message: str | None = None
+    input_path: str | None = None
+    result_dir: str | None = None
+    result_zip_available: bool = False
+    download_ready: bool = False
+    events: list[JobEvent] = []

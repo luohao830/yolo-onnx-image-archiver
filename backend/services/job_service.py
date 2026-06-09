@@ -37,6 +37,24 @@ PERSON_FILTER_PAYLOAD: dict[str, Any] = {
     "force_class_names": ["person"],
 }
 
+SAFE_EVENT_PAYLOAD_KEYS = {
+    "total",
+    "written",
+    "processed",
+    "matched",
+    "skipped",
+    "error",
+}
+
+STATUS_PROGRESS = {
+    "created": 5,
+    "uploaded": 20,
+    "running": 60,
+    "completed": 100,
+    "failed": 100,
+    "canceled": 0,
+}
+
 
 def normalize_job_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     normalized = dict(DEFAULT_JOB_PAYLOAD)
@@ -97,27 +115,49 @@ class JobService:
                 return None
             if not self._verify_access_token(access_token, job.access_token_hash):
                 return None
-            return {
-                "job_code": job.job_code,
-                "mode": job.mode,
-                "status": job.status,
-                "error_message": job.error_message,
-            }
+            events = repo.list_events(job.id)
+            return self._serialize_public_job(job, events)
 
     def list_admin_jobs(self) -> list[dict[str, Any]]:
         with session_scope(self.engine) as session:
             repo = JobRepository(session)
-            return [self._serialize_admin_job(job) for job in repo.list_jobs()]
+            return [
+                self._serialize_admin_job(job, repo.list_events(job.id))
+                for job in repo.list_jobs()
+            ]
+
+    def get_admin_job(self, job_id: int) -> dict[str, Any]:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get(job_id)
+            return self._serialize_admin_job_detail(job, repo.list_events(job.id))
+
+    def resolve_public_result_zip(self, job_code: str, access_token: str) -> Path | None:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get_by_code(job_code)
+            if job is None:
+                return None
+            if not self._verify_access_token(access_token, job.access_token_hash):
+                return None
+            return self._resolve_result_zip(job)
+
+    def resolve_admin_result_zip(self, job_id: int) -> Path:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            return self._resolve_result_zip(repo.get(job_id))
 
     def cancel_job(self, job_id: int) -> dict[str, Any]:
         with session_scope(self.engine) as session:
             repo = JobRepository(session)
             job = repo.get(job_id)
             if job.status in {"created", "uploaded"}:
-                return self._serialize_admin_job(repo.mark_canceled(job_id))
+                updated = repo.mark_canceled(job_id)
+                return self._serialize_admin_job(updated, repo.list_events(job_id))
             if job.status == "running":
-                return self._serialize_admin_job(repo.mark_cancel_requested(job_id))
-            return self._serialize_admin_job(job)
+                updated = repo.mark_cancel_requested(job_id)
+                return self._serialize_admin_job(updated, repo.list_events(job_id))
+            return self._serialize_admin_job(job, repo.list_events(job_id))
 
     def retry_job(self, job_id: int) -> dict[str, Any]:
         with session_scope(self.engine) as session:
@@ -125,7 +165,8 @@ class JobService:
             job = repo.get(job_id)
             if job.status != "failed":
                 raise ValueError("only failed jobs can be retried")
-            return self._serialize_admin_job(repo.reset_for_retry(job_id))
+            updated = repo.reset_for_retry(job_id)
+            return self._serialize_admin_job(updated, repo.list_events(job_id))
 
     def _generate_unique_job_code(self, repo: JobRepository) -> str:
         for _ in range(8):
@@ -156,16 +197,104 @@ class JobService:
             access_token_hash,
         )
 
-    @staticmethod
-    def _serialize_admin_job(job: Any) -> dict[str, Any]:
+    @classmethod
+    def _serialize_public_job(cls, job: Any, events: list[Any]) -> dict[str, Any]:
+        return {
+            "job_code": job.job_code,
+            "mode": job.mode,
+            "status": job.status,
+            "progress": cls._calculate_progress(job, events),
+            "events": [cls._serialize_event(event) for event in events],
+            "error_message": job.error_message,
+            "download_ready": cls._is_download_ready(job),
+        }
+
+    @classmethod
+    def _serialize_admin_job(cls, job: Any, events: list[Any]) -> dict[str, Any]:
         return {
             "id": job.id,
             "job_code": job.job_code,
             "mode": job.mode,
             "status": job.status,
+            "progress": cls._calculate_progress(job, events),
             "cancel_requested": bool(job.cancel_requested),
             "error_message": job.error_message,
+            "result_zip_available": cls._has_result_zip(job),
+            "download_ready": cls._is_download_ready(job),
         }
+
+    @classmethod
+    def _serialize_admin_job_detail(cls, job: Any, events: list[Any]) -> dict[str, Any]:
+        payload = cls._serialize_admin_job(job, events)
+        payload.update(
+            {
+                "input_path": job.input_path,
+                "result_dir": job.result_dir,
+                "events": [cls._serialize_event(event) for event in events],
+            }
+        )
+        return payload
+
+    @classmethod
+    def _calculate_progress(cls, job: Any, events: list[Any]) -> int:
+        if job.status == "completed":
+            return 100
+
+        event_progress = cls._calculate_event_progress(events)
+        if event_progress is not None and job.status in {"running", "failed"}:
+            return event_progress
+
+        return cls._clamp_progress(STATUS_PROGRESS.get(job.status, 0))
+
+    @classmethod
+    def _calculate_event_progress(cls, events: list[Any]) -> int | None:
+        for event in reversed(events):
+            payload = event.payload_json or {}
+            total = payload.get("total")
+            written = payload.get("written")
+            if not isinstance(total, (int, float)) or not isinstance(written, (int, float)):
+                continue
+            if total <= 0:
+                continue
+            return cls._clamp_progress(round((written / total) * 100))
+        return None
+
+    @staticmethod
+    def _clamp_progress(progress: int | float) -> int:
+        return max(0, min(100, int(progress)))
+
+    @classmethod
+    def _serialize_event(cls, event: Any) -> dict[str, Any]:
+        return {
+            "id": event.id,
+            "event_type": event.event_type,
+            "message": event.message,
+            "payload_json": cls._sanitize_event_payload(event.payload_json or {}),
+        }
+
+    @staticmethod
+    def _sanitize_event_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if key in SAFE_EVENT_PAYLOAD_KEYS
+        }
+
+    @classmethod
+    def _is_download_ready(cls, job: Any) -> bool:
+        return job.status == "completed" and cls._has_result_zip(job)
+
+    @staticmethod
+    def _has_result_zip(job: Any) -> bool:
+        return bool(job.result_zip_path and Path(job.result_zip_path).is_file())
+
+    @classmethod
+    def _resolve_result_zip(cls, job: Any) -> Path:
+        if job.status != "completed":
+            raise ValueError("job result is not ready")
+        if not cls._has_result_zip(job):
+            raise FileNotFoundError("job result archive not found")
+        return Path(job.result_zip_path)
 
 
 @lru_cache(maxsize=1)
