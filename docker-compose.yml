@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    container_name: yolo_onnx_webui
+    container_name: yolo_platform_api
     restart: unless-stopped
     shm_size: "2gb"
     deploy:
@@ -12,11 +12,10 @@ services:
               device_ids: ["1"]
               capabilities: [gpu]
     ports:
-      - "57860:7860"
+      - "58000:8000"
     volumes:
-      - ./images:/data/images
       - ./models:/data/models
+      - ./runtime:/app/runtime
       - ./webui:/app/webui
     environment:
-      - IMAGES_DIR=/data/images
       - MODELS_DIR=/data/models
