@@ -104,6 +104,29 @@ class JobService:
                 "error_message": job.error_message,
             }
 
+    def list_admin_jobs(self) -> list[dict[str, Any]]:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            return [self._serialize_admin_job(job) for job in repo.list_jobs()]
+
+    def cancel_job(self, job_id: int) -> dict[str, Any]:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get(job_id)
+            if job.status in {"created", "uploaded"}:
+                return self._serialize_admin_job(repo.mark_canceled(job_id))
+            if job.status == "running":
+                return self._serialize_admin_job(repo.mark_cancel_requested(job_id))
+            return self._serialize_admin_job(job)
+
+    def retry_job(self, job_id: int) -> dict[str, Any]:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get(job_id)
+            if job.status != "failed":
+                raise ValueError("only failed jobs can be retried")
+            return self._serialize_admin_job(repo.reset_for_retry(job_id))
+
     def _generate_unique_job_code(self, repo: JobRepository) -> str:
         for _ in range(8):
             job_code = f"JOB-{secrets.token_hex(6).upper()}"
@@ -132,6 +155,17 @@ class JobService:
             cls._hash_access_token(access_token),
             access_token_hash,
         )
+
+    @staticmethod
+    def _serialize_admin_job(job: Any) -> dict[str, Any]:
+        return {
+            "id": job.id,
+            "job_code": job.job_code,
+            "mode": job.mode,
+            "status": job.status,
+            "cancel_requested": bool(job.cancel_requested),
+            "error_message": job.error_message,
+        }
 
 
 @lru_cache(maxsize=1)

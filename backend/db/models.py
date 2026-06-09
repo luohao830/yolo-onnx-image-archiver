@@ -18,6 +18,7 @@ class JobRecord(Base):
     model_id: Mapped[int | None] = mapped_column(nullable=True)
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="created")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean(), default=False)
     input_path: Mapped[str | None] = mapped_column(Text(), nullable=True)
     result_dir: Mapped[str | None] = mapped_column(Text(), nullable=True)
     result_zip_path: Mapped[str | None] = mapped_column(Text(), nullable=True)
