@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 from backend.core.db import build_engine, create_all, session_scope
-from backend.db.models import ModelRecord
+from backend.db.models import JobEventRecord, ModelRecord
 from backend.repositories.jobs import JobRepository
 from backend.repositories.models import ModelRepository
 from backend.services.runtime_paths import RuntimePaths
@@ -208,11 +208,25 @@ def test_task_runner_persists_completion_with_real_repositories(monkeypatch, tmp
 
     with session_scope(engine) as session:
         saved = JobRepository(session).get(job_id)
+        events = session.query(JobEventRecord).filter_by(job_id=job_id).order_by(JobEventRecord.id).all()
         assert saved.status == "completed"
         assert saved.input_path == str(images_dir)
         assert saved.result_dir == str(tmp_path / "results")
         assert saved.result_zip_path == str(tmp_path / "results.zip")
         assert saved.error_message is None
+        assert [event.event_type for event in events] == ["running", "completed"]
+        assert events[0].message == "任务开始执行"
+        assert events[0].payload_json == {
+            "job_code": "JOB-100",
+            "out_dir": str(tmp_path / "runtime" / "results" / "JOB-100"),
+        }
+        assert events[1].message == "任务执行完成"
+        assert events[1].payload_json == {
+            "result_dir": str(tmp_path / "results"),
+            "result_zip_path": str(tmp_path / "results.zip"),
+            "total": 4,
+            "written": 4,
+        }
 
 
 def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_path: Path) -> None:
@@ -254,10 +268,19 @@ def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_pa
 
     with session_scope(engine) as session:
         saved = JobRepository(session).get(job_id)
+        events = session.query(JobEventRecord).filter_by(job_id=job_id).order_by(JobEventRecord.id).all()
         assert saved.status == "failed"
         assert saved.error_message == "gpu unavailable"
         assert saved.result_dir is None
         assert saved.result_zip_path is None
+        assert [event.event_type for event in events] == ["running", "failed"]
+        assert events[0].message == "任务开始执行"
+        assert events[0].payload_json == {
+            "job_code": "JOB-101",
+            "out_dir": str(tmp_path / "runtime" / "results" / "JOB-101"),
+        }
+        assert events[1].message == "任务执行失败"
+        assert events[1].payload_json == {"error": "gpu unavailable"}
 
 
 class _DummyGpuGate:
