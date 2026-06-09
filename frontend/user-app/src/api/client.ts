@@ -8,6 +8,11 @@ export interface CreateJobResponse {
   status: string;
 }
 
+export interface PublishedModel {
+  id: string;
+  name: string;
+}
+
 const DEFAULT_API_BASE_URL = "/api";
 
 function resolveApiBaseUrl(): string {
@@ -34,4 +39,14 @@ export async function createJob(mode: JobMode): Promise<CreateJobResponse> {
   }
 
   return response.json() as Promise<CreateJobResponse>;
+}
+
+export async function listPublishedModels(): Promise<PublishedModel[]> {
+  const response = await fetch(`${resolveApiBaseUrl()}/jobs/models`);
+
+  if (!response.ok) {
+    throw new Error(`list models failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<PublishedModel[]>;
 }
