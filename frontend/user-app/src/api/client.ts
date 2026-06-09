@@ -1,7 +1,27 @@
+/// <reference types="vite/client" />
+
 export type JobMode = "person_filter" | "advanced";
 
-export async function createJob(mode: JobMode) {
-  const response = await fetch("/api/jobs", {
+export interface CreateJobResponse {
+  job_code: string;
+  access_token: string;
+  status: string;
+}
+
+const DEFAULT_API_BASE_URL = "/api";
+
+function resolveApiBaseUrl(): string {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+
+  if (!configuredBaseUrl) {
+    return DEFAULT_API_BASE_URL;
+  }
+
+  return configuredBaseUrl.replace(/\/+$/, "");
+}
+
+export async function createJob(mode: JobMode): Promise<CreateJobResponse> {
+  const response = await fetch(`${resolveApiBaseUrl()}/jobs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -9,5 +29,9 @@ export async function createJob(mode: JobMode) {
     body: JSON.stringify({ mode })
   });
 
-  return response.json();
+  if (!response.ok) {
+    throw new Error(`create job failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<CreateJobResponse>;
 }
