@@ -9,6 +9,13 @@ export interface CreateJobResponse {
   status: string;
 }
 
+export interface JobEvent {
+  id: number;
+  event_type: string;
+  message: string;
+  payload_json: Record<string, unknown>;
+}
+
 export interface PublishedModel {
   id: string;
   name: string;
@@ -18,7 +25,10 @@ export interface PublicJobStatus {
   job_code: string;
   mode: JobMode;
   status: JobStatus;
+  progress: number;
+  events: JobEvent[];
   error_message?: string | null;
+  download_ready: boolean;
 }
 
 const DEFAULT_API_BASE_URL = "/api";
@@ -75,6 +85,14 @@ export async function getJobStatus(
   }
 
   return response.json() as Promise<PublicJobStatus>;
+}
+
+export function buildJobDownloadUrl(jobCode: string, accessToken: string): string {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+
+  return `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/download?${searchParams.toString()}`;
 }
 
 async function readErrorMessage(response: Response, fallbackMessage: string): Promise<string> {

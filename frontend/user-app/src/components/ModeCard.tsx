@@ -9,10 +9,10 @@ interface ModeCardProps {
 
 export function ModeCard({ title, description, to }: ModeCardProps) {
   return (
-    <article>
+    <article className="mode-card">
       <h2>{title}</h2>
       <p>{description}</p>
-      <Link to={to}>{title}</Link>
+      <Link className="button button--secondary" to={to} aria-label={title}>进入</Link>
     </article>
   );
 }

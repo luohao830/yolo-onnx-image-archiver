@@ -23,5 +23,6 @@ describe("HomePage", () => {
 
     expect(personFilterLink.getAttribute("href")).toBe("/person-filter");
     expect(advancedLink.getAttribute("href")).toBe("/advanced");
+    expect(screen.queryByText("任务凭证查询")).toBeNull();
   });
 });
