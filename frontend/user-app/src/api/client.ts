@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 export type JobMode = "person_filter" | "advanced";
-export type JobStatus = "created" | "uploaded" | "running" | "completed" | "failed";
+export type JobStatus = "created" | "uploaded" | "running" | "completed" | "failed" | "canceled";
 
 export interface CreateJobResponse {
   job_code: string;

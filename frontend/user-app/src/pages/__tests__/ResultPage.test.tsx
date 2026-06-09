@@ -85,6 +85,31 @@ describe("ResultPage", () => {
     expect(getJobStatus).toHaveBeenCalledTimes(1);
   });
 
+  it("stops polling and shows canceled timeline state", async () => {
+    vi.mocked(getJobStatus).mockResolvedValue({
+      job_code: "JOB-499",
+      mode: "person_filter",
+      status: "canceled"
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/results/JOB-499?access_token=token-499"]}>
+        <Routes>
+          <Route path="/results/:jobCode" element={<ResultPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(getJobStatus).toHaveBeenCalledWith("JOB-499", "token-499");
+      expect(screen.getByText("canceled")).toBeTruthy();
+      expect(screen.getByText("任务已取消")).toBeTruthy();
+    });
+
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(getJobStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps polling after a transient error and eventually stops at completed", async () => {
     vi.mocked(getJobStatus)
       .mockResolvedValueOnce({

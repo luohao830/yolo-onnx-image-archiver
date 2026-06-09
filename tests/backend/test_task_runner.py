@@ -283,6 +283,53 @@ def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_pa
         assert events[1].payload_json == {"error": "gpu unavailable"}
 
 
+def test_task_runner_marks_failed_when_model_is_missing(monkeypatch, tmp_path: Path) -> None:
+    run_job_inference = MagicMock()
+    package_job_output = MagicMock()
+    monkeypatch.setattr("backend.services.inference_adapter.run_job_inference", run_job_inference)
+    monkeypatch.setattr("backend.services.inference_adapter.package_job_output", package_job_output)
+
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    runtime_paths = RuntimePaths(tmp_path / "runtime")
+    job_id = None
+
+    with session_scope(engine) as session:
+        job_repo = JobRepository(session)
+        job = job_repo.create_job(
+            job_code="JOB-102",
+            access_token_hash="hash",
+            mode="person_filter",
+            model_id=None,
+            payload_json=None,
+        )
+        job_repo.mark_uploaded(job.id, input_path=str(images_dir))
+        job_id = job.id
+
+    with session_scope(engine) as session:
+        runner = TaskRunner(
+            job_repo=JobRepository(session),
+            model_repo=ModelRepository(session),
+            config_repo=MagicMock(),
+            gpu_gate=_DummyGpuGate(),
+            runtime_paths=runtime_paths,
+        )
+        runner.run(job_id=job_id)
+
+    with session_scope(engine) as session:
+        saved = JobRepository(session).get(job_id)
+        events = session.query(JobEventRecord).filter_by(job_id=job_id).order_by(JobEventRecord.id).all()
+        assert saved.status == "failed"
+        assert saved.error_message == "job model is missing"
+        assert [event.event_type for event in events] == ["running", "failed"]
+        assert events[1].payload_json == {"error": "job model is missing"}
+
+    run_job_inference.assert_not_called()
+    package_job_output.assert_not_called()
+
+
 class _DummyGpuGate:
     def acquire(self):
         return self

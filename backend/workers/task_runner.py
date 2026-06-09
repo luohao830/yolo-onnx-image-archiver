@@ -19,8 +19,6 @@ class TaskRunner:
         self.runtime_paths.ensure()
 
         job = self.job_repo.get(job_id)
-        model = self.model_repo.get(job.model_id)
-        payload = normalize_job_payload(getattr(job, "payload_json", None))
         out_dir = self.runtime_paths.results / job.job_code
 
         self.job_repo.mark_running(job_id)
@@ -34,6 +32,13 @@ class TaskRunner:
         )
 
         try:
+            model_id = getattr(job, "model_id", None)
+            if model_id is None:
+                raise LookupError("job model is missing")
+
+            model = self.model_repo.get(model_id)
+            payload = normalize_job_payload(getattr(job, "payload_json", None))
+
             if not getattr(job, "input_path", None):
                 raise ValueError("job input path is missing")
             with self.gpu_gate.acquire():
