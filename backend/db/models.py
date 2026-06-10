@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, String, Text
+from sqlalchemy import JSON, Boolean, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.core.db import Base
@@ -55,16 +54,3 @@ class JobEventRecord(Base):
     event_type: Mapped[str] = mapped_column(String(32))
     message: Mapped[str] = mapped_column(Text())
     payload_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-
-
-class UploadedArchiveRecord(Base):
-    __tablename__ = "uploaded_archives"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    content_sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    original_filename: Mapped[str] = mapped_column(String(255))
-    archive_path: Mapped[str] = mapped_column(Text())
-    extracted_path: Mapped[str] = mapped_column(Text())
-    size_bytes: Mapped[int] = mapped_column()
-    image_count: Mapped[int] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column(DateTime(), default=datetime.utcnow)

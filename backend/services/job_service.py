@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import re
 import secrets
 import shutil
 import tempfile
-import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, BinaryIO, Mapping
@@ -17,7 +15,6 @@ from backend.core.config import settings
 from backend.core.db import build_engine, create_all, session_scope
 from backend.repositories.jobs import JobRepository
 from backend.repositories.models import ModelRepository
-from backend.repositories.uploaded_archives import UploadedArchiveRepository
 from backend.services.archive_ingest import SUPPORTED_IMAGE_SUFFIXES, extract_upload_archive
 from backend.services.runtime_paths import RuntimePaths
 
@@ -46,11 +43,9 @@ PERSON_FILTER_PAYLOAD: dict[str, Any] = {
 }
 
 SAFE_EVENT_PAYLOAD_KEYS = {
-    "content_sha256",
     "filename",
     "image_count",
     "progress",
-    "reused",
     "size_bytes",
     "stage",
     "total",
@@ -70,9 +65,6 @@ STATUS_PROGRESS = {
     "canceled": 0,
 }
 MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024 * 1024
-SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
-_ARCHIVE_LOCKS: dict[str, threading.Lock] = {}
-_ARCHIVE_LOCKS_GUARD = threading.Lock()
 
 
 class UploadTooLargeError(ValueError):
@@ -149,7 +141,6 @@ class JobService:
         *,
         filename: str,
         file_obj: BinaryIO,
-        content_sha256: str | None = None,
     ) -> tuple[int, dict[str, Any]]:
         self.runtime_paths.ensure()
         job_id, model_id = self._resolve_upload_targets(job_code, access_token)
@@ -157,7 +148,6 @@ class JobService:
             job_code,
             filename,
             file_obj,
-            content_sha256=content_sha256,
         )
 
         with session_scope(self.engine) as session:
@@ -172,71 +162,6 @@ class JobService:
             )
             repo.record_event(job.id, **upload_event)
             return updated.id, self._serialize_public_job(updated, repo.list_events(updated.id))
-
-    def reuse_public_uploaded_archive(
-        self,
-        job_code: str,
-        access_token: str,
-        *,
-        content_sha256: str,
-    ) -> tuple[int, dict[str, Any]]:
-        self.runtime_paths.ensure()
-        self._validate_sha256(content_sha256)
-        job_id, model_id = self._resolve_upload_targets(job_code, access_token)
-        archive = self._get_available_uploaded_archive(content_sha256)
-        if archive is None:
-            raise FileNotFoundError("uploaded archive not found")
-
-        input_dir = self.runtime_paths.jobs / job_code / "input"
-        self._copy_cached_extract_to_input(Path(archive["extracted_path"]), input_dir)
-
-        with session_scope(self.engine) as session:
-            repo = JobRepository(session)
-            job = repo.get(job_id)
-            if job.status != "created":
-                raise ValueError("job has already been uploaded or started")
-            updated = repo.mark_uploaded(
-                job.id,
-                input_path=str(input_dir),
-                model_id=model_id,
-            )
-            repo.record_event(
-                job.id,
-                **build_job_event(
-                    event_type="uploaded",
-                    message="已复用上传压缩包，任务已进入队列",
-                    payload_json={
-                        "stage": "upload",
-                        "progress": 100,
-                        "total": archive["image_count"],
-                        "content_sha256": content_sha256,
-                        "filename": archive["original_filename"],
-                        "image_count": archive["image_count"],
-                        "reused": True,
-                    },
-                ),
-            )
-            return updated.id, self._serialize_public_job(updated, repo.list_events(updated.id))
-
-    def list_uploaded_archives(self) -> list[dict[str, Any]]:
-        with session_scope(self.engine) as session:
-            repo = UploadedArchiveRepository(session)
-            return [self._serialize_uploaded_archive(archive) for archive in repo.list_archives()]
-
-    def delete_uploaded_archives(self, ids: list[int]) -> int:
-        with session_scope(self.engine) as session:
-            repo = UploadedArchiveRepository(session)
-            archives = repo.delete_many(ids)
-            serialized = [self._serialize_uploaded_archive(archive) for archive in archives]
-
-        for archive in serialized:
-            shutil.rmtree(Path(archive["extracted_path"]), ignore_errors=True)
-            Path(archive["archive_path"]).unlink(missing_ok=True)
-            parent = Path(archive["archive_path"]).parent
-            if parent.exists() and not any(parent.iterdir()):
-                parent.rmdir()
-
-        return len(serialized)
 
     def list_admin_jobs(self) -> list[dict[str, Any]]:
         with session_scope(self.engine) as session:
@@ -311,43 +236,26 @@ class JobService:
         job_code: str,
         filename: str,
         file_obj: BinaryIO,
-        *,
-        content_sha256: str | None = None,
     ) -> tuple[Path, dict[str, Any]]:
         safe_filename = Path(filename or "upload").name or "upload"
         suffix = Path(safe_filename).suffix.lower()
         if suffix != ".zip" and suffix not in SUPPORTED_IMAGE_SUFFIXES:
             raise ValueError("仅支持图片文件或 zip 压缩包")
-        if content_sha256 is not None:
-            self._validate_sha256(content_sha256)
 
         upload_dir = self.runtime_paths.uploads / job_code
         input_dir = self.runtime_paths.jobs / job_code / "input"
         upload_dir.mkdir(parents=True, exist_ok=True)
         raw_path = upload_dir / safe_filename
 
-        size_bytes, actual_sha256 = self._copy_upload_with_size_limit(file_obj, raw_path)
-        if content_sha256 is not None and actual_sha256.lower() != content_sha256.lower():
-            raw_path.unlink(missing_ok=True)
-            raise ValueError("上传文件 hash 与客户端计算结果不一致")
+        size_bytes = self._copy_upload_with_size_limit(file_obj, raw_path)
 
         if input_dir.exists():
             shutil.rmtree(input_dir)
 
         if suffix == ".zip":
-            with self._archive_lock(actual_sha256):
-                archive = self._get_available_uploaded_archive(actual_sha256)
-                if archive is None:
-                    archive = self._cache_uploaded_archive(
-                        raw_path,
-                        safe_filename=safe_filename,
-                        content_sha256=actual_sha256,
-                        size_bytes=size_bytes,
-                    )
-                else:
-                    raw_path.unlink(missing_ok=True)
-
-            self._copy_cached_extract_to_input(Path(archive["extracted_path"]), input_dir)
+            extracted = extract_upload_archive(raw_path, input_dir)
+            if not extracted:
+                raise ValueError("压缩包内未找到支持的图片")
             return (
                 input_dir,
                 build_job_event(
@@ -356,12 +264,10 @@ class JobService:
                     payload_json={
                         "stage": "upload",
                         "progress": 100,
-                        "total": archive["image_count"],
-                        "content_sha256": actual_sha256,
+                        "total": len(extracted),
                         "filename": safe_filename,
-                        "image_count": archive["image_count"],
+                        "image_count": len(extracted),
                         "size_bytes": size_bytes,
-                        "reused": archive["reused"],
                     },
                 ),
             )
@@ -383,9 +289,8 @@ class JobService:
         )
 
     @staticmethod
-    def _copy_upload_with_size_limit(file_obj: BinaryIO, raw_path: Path) -> tuple[int, str]:
+    def _copy_upload_with_size_limit(file_obj: BinaryIO, raw_path: Path) -> int:
         written = 0
-        hasher = hashlib.sha256()
         try:
             with raw_path.open("wb") as dst:
                 while True:
@@ -395,89 +300,11 @@ class JobService:
                     written += len(chunk)
                     if written > MAX_UPLOAD_FILE_BYTES:
                         raise UploadTooLargeError("上传文件大小不能超过 100G")
-                    hasher.update(chunk)
                     dst.write(chunk)
         except Exception:
             raw_path.unlink(missing_ok=True)
             raise
-        return written, hasher.hexdigest()
-
-    def _cache_uploaded_archive(
-        self,
-        raw_path: Path,
-        *,
-        safe_filename: str,
-        content_sha256: str,
-        size_bytes: int,
-    ) -> dict[str, Any]:
-        archive_dir = self.runtime_paths.upload_archives / content_sha256
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        cached_archive_path = archive_dir / "archive.zip"
-        extracted_path = archive_dir / "extracted"
-        if extracted_path.exists():
-            shutil.rmtree(extracted_path)
-        try:
-            raw_path.replace(cached_archive_path)
-            extracted = extract_upload_archive(cached_archive_path, extracted_path)
-            if not extracted:
-                raise ValueError("压缩包内未找到支持的图片")
-            image_count = len(extracted)
-            with session_scope(self.engine) as session:
-                archive = UploadedArchiveRepository(session).create(
-                    content_sha256=content_sha256,
-                    original_filename=safe_filename,
-                    archive_path=str(cached_archive_path),
-                    extracted_path=str(extracted_path),
-                    size_bytes=size_bytes,
-                    image_count=image_count,
-                )
-                payload = self._serialize_uploaded_archive(archive)
-                payload["reused"] = False
-                return payload
-        except Exception:
-            shutil.rmtree(archive_dir, ignore_errors=True)
-            raw_path.unlink(missing_ok=True)
-            raise
-
-    def _get_available_uploaded_archive(self, content_sha256: str) -> dict[str, Any] | None:
-        with session_scope(self.engine) as session:
-            archive = UploadedArchiveRepository(session).get_by_sha256(content_sha256.lower())
-            if archive is None:
-                return None
-            payload = self._serialize_uploaded_archive(archive)
-
-        if not Path(payload["archive_path"]).is_file() or not Path(payload["extracted_path"]).is_dir():
-            self._delete_uploaded_archive_record(payload["id"])
-            return None
-
-        payload["reused"] = True
-        return payload
-
-    def _delete_uploaded_archive_record(self, archive_id: int) -> None:
-        with session_scope(self.engine) as session:
-            archive = UploadedArchiveRepository(session).get(archive_id)
-            if archive is not None:
-                session.delete(archive)
-
-    @staticmethod
-    def _archive_lock(content_sha256: str) -> threading.Lock:
-        with _ARCHIVE_LOCKS_GUARD:
-            if content_sha256 not in _ARCHIVE_LOCKS:
-                _ARCHIVE_LOCKS[content_sha256] = threading.Lock()
-            return _ARCHIVE_LOCKS[content_sha256]
-
-    @staticmethod
-    def _copy_cached_extract_to_input(source_dir: Path, input_dir: Path) -> None:
-        input_dir.parent.mkdir(parents=True, exist_ok=True)
-        temp_input_dir = Path(tempfile.mkdtemp(prefix=f".{input_dir.name}-", dir=input_dir.parent))
-        try:
-            shutil.copytree(source_dir, temp_input_dir, dirs_exist_ok=True)
-            if input_dir.exists():
-                shutil.rmtree(input_dir)
-            temp_input_dir.replace(input_dir)
-        except Exception:
-            shutil.rmtree(temp_input_dir, ignore_errors=True)
-            raise
+        return written
 
     @staticmethod
     def _copy_single_image_to_input(source: Path, input_dir: Path) -> None:
@@ -608,25 +435,6 @@ class JobService:
             key: value
             for key, value in payload.items()
             if key in SAFE_EVENT_PAYLOAD_KEYS
-        }
-
-    @staticmethod
-    def _validate_sha256(content_sha256: str) -> None:
-        if not SHA256_PATTERN.fullmatch(content_sha256):
-            raise ValueError("content_sha256 must be a 64-character hex digest")
-
-    @staticmethod
-    def _serialize_uploaded_archive(archive: Any) -> dict[str, Any]:
-        created_at = archive.created_at.isoformat() if archive.created_at is not None else ""
-        return {
-            "id": archive.id,
-            "content_sha256": archive.content_sha256,
-            "original_filename": archive.original_filename,
-            "archive_path": archive.archive_path,
-            "extracted_path": archive.extracted_path,
-            "size_bytes": archive.size_bytes,
-            "image_count": archive.image_count,
-            "created_at": created_at,
         }
 
     @classmethod

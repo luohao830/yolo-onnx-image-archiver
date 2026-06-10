@@ -16,10 +16,6 @@ vi.mock("../pages/JobsPage", () => ({
   JobsPage: () => <h1>任务监控页面</h1>
 }));
 
-vi.mock("../pages/UploadedArchivesPage", () => ({
-  UploadedArchivesPage: () => <h1>压缩包管理页面</h1>
-}));
-
 vi.mock("../api/client", () => ({
   adminLogin: vi.fn()
 }));

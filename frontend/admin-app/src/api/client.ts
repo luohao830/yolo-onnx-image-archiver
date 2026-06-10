@@ -52,19 +52,6 @@ export interface AdminJobDetail extends AdminJob {
   events: AdminJobEvent[];
 }
 
-export interface UploadedArchive {
-  id: number;
-  content_sha256: string;
-  original_filename: string;
-  size_bytes: number;
-  image_count: number;
-  created_at: string;
-}
-
-export interface DeleteUploadedArchivesResponse {
-  deleted: number;
-}
-
 const DEFAULT_API_BASE_URL = "/api";
 const ADMIN_TOKEN_KEY = "admin-token";
 
@@ -92,32 +79,6 @@ export async function adminLogin(secret: string): Promise<AdminLoginResponse> {
   }
 
   return response.json() as Promise<AdminLoginResponse>;
-}
-
-export async function listUploadedArchives(): Promise<UploadedArchive[]> {
-  const response = await authorizedFetch("/admin/uploads");
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, `list uploaded archives failed: ${response.status}`));
-  }
-
-  return response.json() as Promise<UploadedArchive[]>;
-}
-
-export async function deleteUploadedArchives(ids: number[]): Promise<DeleteUploadedArchivesResponse> {
-  const response = await authorizedFetch("/admin/uploads", {
-    method: "DELETE",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ ids })
-  });
-
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response, `delete uploaded archives failed: ${response.status}`));
-  }
-
-  return response.json() as Promise<DeleteUploadedArchivesResponse>;
 }
 
 export async function listAdminModels(): Promise<AdminModel[]> {

@@ -134,43 +134,6 @@ nav[aria-label="后台导航"] a:hover,
   padding: 12px 14px;
 }
 
-.archive-row {
-  display: grid;
-  grid-template-columns: 72px 1fr minmax(220px, 1.4fr) 90px 110px 180px;
-  gap: 12px;
-  align-items: center;
-  border-bottom: 1px solid #e2e8f0;
-  padding: 12px 14px;
-}
-
-.archive-row:last-child {
-  border-bottom: 0;
-}
-
-.archive-row--head {
-  background: #f8fafc;
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.archive-row input {
-  width: 18px;
-  height: 18px;
-}
-
-.toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.mono-text {
-  color: #334155;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
 .job-row:last-child {
   border-bottom: 0;
 }
@@ -228,11 +191,6 @@ input:focus-visible {
 
 .button--success {
   background: #16a34a;
-  color: #fff;
-}
-
-.button--danger {
-  background: #dc2626;
   color: #fff;
 }
 

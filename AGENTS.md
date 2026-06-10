@@ -9,7 +9,7 @@
 - `gateway/` 保存统一入口 Nginx 配置；Docker Compose 通过 `gateway` 将 `/`、`/admin/` 和 `/api/` 聚合到宿主机 `58000` 端口。
 - `webui/` 是旧版 Gradio 工具链和推理内核，当前不再是默认容器入口，但 `backend/services/inference_adapter.py` 会复用 `webui.processing`。
 - `models/` 保存宿主机模型文件，Docker 后端挂载为 `/data/models`。
-- `runtime/` 是运行时工作区，保存 SQLite 数据库、上传文件、压缩包缓存、任务目录、结果目录和临时文件；不要提交运行产物。
+- `runtime/` 是运行时工作区，保存 SQLite 数据库、上传文件、任务目录、结果目录和临时文件；不要提交运行产物。
 - `images/` 主要服务旧版 `webui/` 工作流，当前 Docker Compose 不挂载该目录。
 - `tests/backend/` 保存后端单元测试与 API smoke 测试；前端测试放在各自 `src/**/__tests__/` 附近。
 
@@ -17,9 +17,9 @@
 
 - 主线平台由 `backend`、`user-app`、`admin-app` 和 `gateway` 4 个 Compose 服务组成。
 - 后端默认使用 SQLite，数据库文件位于 `runtime/app.db`；当前没有 MongoDB，也不使用 `fo_data/`。
-- 公开接口已支持创建任务凭证、人员筛选上传入队、按 SHA-256 复用已上传压缩包、查询任务状态/关键日志、下载已完成任务结果压缩包和列出高级模式可见模型。
-- 管理员接口已支持登录、IP 白名单免密、模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消、重试和已上传压缩包管理。
-- 公开前台的人员筛选模式已接入图片或 `.zip` 压缩包上传、压缩包 hash 复用、归档解压、默认人员模型绑定和任务入队；高级模式的模型参数与文件上传提交尚未接入公开 API，修改文档或功能时必须明确这条边界。
+- 公开接口已支持创建任务凭证、人员筛选上传入队、查询任务状态/关键日志、下载已完成任务结果压缩包和列出高级模式可见模型。
+- 管理员接口已支持登录、IP 白名单免密、模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消和重试。
+- 公开前台的人员筛选模式已接入图片或 `.zip` 压缩包上传、归档解压、默认人员模型绑定和任务入队；高级模式的模型参数与文件上传提交尚未接入公开 API，修改文档或功能时必须明确这条边界。
 
 ## 构建、运行与开发
 
@@ -38,7 +38,7 @@
 - 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS` 和 `YOLO_PLATFORM_ADMIN_IP_WHITELIST`。
 - 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
-- Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包按 SHA-256 缓存在 `runtime/uploads/archives/`，后台可删除指定缓存；修改体积或缓存语义时必须同步文档。
+- Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传并解压到当前任务目录，不做 hash 复用或服务端压缩包缓存；修改体积或上传语义时必须同步文档。
 - 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端优先读取 gateway 覆盖写入的 `X-Real-IP` 用于白名单判断，不信任客户端传入的 `X-Forwarded-For`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。

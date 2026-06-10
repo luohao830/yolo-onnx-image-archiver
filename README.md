@@ -4,13 +4,13 @@
 
 ## 当前能力
 
-- `backend/`：FastAPI API 服务，提供公开任务创建、人员筛选上传/压缩包复用入队、状态/日志查询、结果下载、管理员登录、模型管理、并发配置、任务监控、压缩包管理、详情、取消、重试与下载接口。
+- `backend/`：FastAPI API 服务，提供公开任务创建、人员筛选上传入队、状态/日志查询、结果下载、管理员登录、模型管理、并发配置、任务监控、详情、取消、重试与下载接口。
 - `frontend/user-app/`：匿名用户前台，包含首页、人员筛选入口、高级模式入口和任务进度/关键日志/结果下载视图。
-- `frontend/admin-app/`：管理员后台，包含密钥登录/白名单免密、模型管理、系统配置、任务监控和压缩包管理页面。
+- `frontend/admin-app/`：管理员后台，包含密钥登录/白名单免密、模型管理、系统配置和任务监控页面。
 - `gateway/`：Nginx 统一入口，将用户前台、管理员后台和 `/api/` 转发到同一端口。
 - `webui/`：旧版 Gradio 工具链与 `webui.processing.run_inference` 推理实现，后端 `TaskRunner` 通过适配层复用它。
 
-当前阶段已经打通人员筛选模式的任务创建、图片/压缩包上传、压缩包 SHA-256 复用、归档解压、任务入队、状态/关键日志查询和已完成任务结果下载链路。高级模式仍只支持公开模型列表和任务凭证基础能力，模型参数与文件上传提交尚未接入公开 API。
+当前阶段已经打通人员筛选模式的任务创建、图片/压缩包上传、归档解压、任务入队、状态/关键日志查询和已完成任务结果下载链路。高级模式仍只支持公开模型列表和任务凭证基础能力，模型参数与文件上传提交尚未接入公开 API。
 
 ## 目录结构
 
@@ -23,7 +23,7 @@
 ├── gateway/                 # Docker Compose 统一入口 Nginx 配置
 ├── images/                  # 旧版 webui 默认图片目录，当前 Compose 不挂载
 ├── models/                  # 模型文件目录，Docker 中挂载为 /data/models
-├── runtime/                 # 运行时工作区，保存 SQLite、上传缓存、任务和结果产物
+├── runtime/                 # 运行时工作区，保存 SQLite、上传文件、任务和结果产物
 ├── tests/backend/           # 后端单元测试与 API smoke 测试
 └── webui/                   # 旧版 Gradio UI、推理处理与 worker 代码
 ```
@@ -70,7 +70,7 @@ http://127.0.0.1:58000/
 - `/admin/`：管理员后台
 - `/api/...`：后端 API
 
-gateway 默认允许最大 `100g` 请求体，用于人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包会按 SHA-256 保存到 `runtime/uploads/archives/`，重复上传前端会先计算 hash 并请求复用缓存，命中后不再上传原始包。
+gateway 默认允许最大 `100g` 请求体，用于人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传到当前任务目录并解压，不做 hash 复用或服务端压缩包缓存。
 
 常用命令：
 
@@ -179,8 +179,6 @@ dev-secret
 
 任务监控页当前支持查看任务列表、查看单个任务详情与关键日志、下载已完成任务输出、取消任务和重试失败任务。
 
-压缩包管理页当前支持查看系统内按 SHA-256 去重保存的已上传 `.zip` 压缩包，并勾选删除指定压缩包缓存。删除会移除数据库记录、原始压缩包和对应解压缓存；已经复制到具体任务目录的输入文件不会被回滚。
-
 ## API 摘要
 
 公开接口：
@@ -188,7 +186,6 @@ dev-secret
 - `GET /api/healthz`
 - `POST /api/jobs`
 - `POST /api/jobs/{job_code}/upload?access_token=...`
-- `POST /api/jobs/{job_code}/reuse-upload?access_token=...`
 - `GET /api/jobs/{job_code}?access_token=...`
 - `GET /api/jobs/{job_code}/download?access_token=...`
 - `GET /api/jobs/models`
@@ -208,8 +205,6 @@ dev-secret
 - `GET /api/admin/jobs/{job_id}/download`
 - `POST /api/admin/jobs/{job_id}/cancel`
 - `POST /api/admin/jobs/{job_id}/retry`
-- `GET /api/admin/uploads`
-- `DELETE /api/admin/uploads`
 
 ## 测试
 
