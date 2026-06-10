@@ -62,18 +62,46 @@ def is_admin_ip_whitelisted(request: Request) -> bool:
 
 
 def _resolve_client_ip(request: Request) -> str:
+    direct_client_ip = request.client.host if request.client is not None else ""
     real_ip = request.headers.get("x-real-ip", "").strip()
-    if real_ip:
+    if real_ip and _is_trusted_proxy_client(direct_client_ip):
         return real_ip
-    if request.client is None:
-        return ""
-    return request.client.host
+    return direct_client_ip
+
+
+def _is_trusted_proxy_client(client_ip: str) -> bool:
+    if not client_ip:
+        return False
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+
+    for entry in _configured_admin_trusted_proxy_cidrs():
+        try:
+            if "/" in entry:
+                if address in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif address == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+
+    return False
 
 
 def _configured_admin_ip_whitelist() -> list[str]:
     return [
         item.strip()
         for item in settings.admin_ip_whitelist.split(",")
+        if item.strip()
+    ]
+
+
+def _configured_admin_trusted_proxy_cidrs() -> list[str]:
+    return [
+        item.strip()
+        for item in settings.admin_trusted_proxy_cidrs.split(",")
         if item.strip()
     ]
 
