@@ -36,6 +36,19 @@ function clampProgress(progress: number): number {
   return Math.max(0, Math.min(100, Math.round(progress)));
 }
 
+function getFallbackProgress(status: JobStatus): number {
+  const values: Record<JobStatus, number> = {
+    created: 0,
+    uploaded: 100,
+    running: 0,
+    completed: 100,
+    failed: 100,
+    canceled: 0
+  };
+
+  return values[status];
+}
+
 export function JobProgressPanel({ jobCode, accessToken, initialStatus = "created" }: JobProgressPanelProps) {
   const [result, setResult] = useState<PublicJobStatus | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -98,7 +111,7 @@ export function JobProgressPanel({ jobCode, accessToken, initialStatus = "create
   }, [accessToken, jobCode]);
 
   const status = result?.status ?? initialStatus;
-  const progress = clampProgress(result?.progress ?? 5);
+  const progress = clampProgress(result?.progress ?? getFallbackProgress(status));
   const events = result?.events ?? [];
   const downloadUrl =
     result?.download_ready && result.status === "completed"

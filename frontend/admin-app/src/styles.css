@@ -47,9 +47,21 @@ nav[aria-label="后台导航"] a {
   padding: 9px 12px;
 }
 
-nav[aria-label="后台导航"] a:hover {
+nav[aria-label="后台导航"] a:hover,
+.nav-logout:hover {
   background: rgba(59, 130, 246, 0.22);
   color: #fff;
+}
+
+.nav-logout {
+  margin-left: auto;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #cbd5e1;
+  font-weight: 800;
+  padding: 9px 12px;
+  cursor: pointer;
 }
 
 .admin-page {
@@ -122,6 +134,43 @@ nav[aria-label="后台导航"] a:hover {
   padding: 12px 14px;
 }
 
+.archive-row {
+  display: grid;
+  grid-template-columns: 72px 1fr minmax(220px, 1.4fr) 90px 110px 180px;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 12px 14px;
+}
+
+.archive-row:last-child {
+  border-bottom: 0;
+}
+
+.archive-row--head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.archive-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.mono-text {
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .job-row:last-child {
   border-bottom: 0;
 }
@@ -179,6 +228,11 @@ input:focus-visible {
 
 .button--success {
   background: #16a34a;
+  color: #fff;
+}
+
+.button--danger {
+  background: #dc2626;
   color: #fff;
 }
 
@@ -313,17 +367,24 @@ input:focus-visible {
   }
 
   .jobs-layout,
-  .job-row {
+  .job-row,
+  .archive-row {
     grid-template-columns: 1fr;
   }
 
-  .job-row--head {
+  .job-row--head,
+  .archive-row--head {
     display: none;
   }
 
   nav[aria-label="后台导航"] {
     overflow-x: auto;
     padding: 12px;
+  }
+
+  .nav-logout {
+    margin-left: 0;
+    white-space: nowrap;
   }
 }
 

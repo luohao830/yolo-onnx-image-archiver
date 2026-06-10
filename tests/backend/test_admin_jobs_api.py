@@ -28,7 +28,7 @@ def test_admin_can_list_jobs(tmp_path: Path) -> None:
     assert [job.job_code for job in jobs] == ["JOB-001", "JOB-002"]
     assert jobs[0].status == "created"
     assert jobs[1].mode == "advanced"
-    assert jobs[0].progress == 5
+    assert jobs[0].progress == 0
     assert jobs[0].download_ready is False
 
 

@@ -31,6 +31,11 @@ export interface PublicJobStatus {
   download_ready: boolean;
 }
 
+export interface UploadJobFileOptions {
+  contentSha256?: string;
+  onProgress?: (progress: number) => void;
+}
+
 const DEFAULT_API_BASE_URL = "/api";
 
 function resolveApiBaseUrl(): string {
@@ -90,27 +95,59 @@ export async function getJobStatus(
 export async function uploadJobFile(
   jobCode: string,
   accessToken: string,
-  file: File
+  file: File,
+  options: UploadJobFileOptions = {}
 ): Promise<PublicJobStatus> {
   const searchParams = new URLSearchParams({
     access_token: accessToken
   });
   const formData = new FormData();
   formData.append("file", file);
+  if (options.contentSha256) {
+    formData.append("content_sha256", options.contentSha256);
+  }
 
-  const response = await fetch(
+  return sendUploadRequest(
     `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/upload?${searchParams.toString()}`,
+    formData,
+    options.onProgress
+  );
+}
+
+export async function reuseUploadedArchive(
+  jobCode: string,
+  accessToken: string,
+  contentSha256: string
+): Promise<PublicJobStatus | null> {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+  const response = await fetch(
+    `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/reuse-upload?${searchParams.toString()}`,
     {
       method: "POST",
-      body: formData
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ content_sha256: contentSha256 })
     }
   );
 
+  if (response.status === 404) {
+    return null;
+  }
   if (!response.ok) {
-    throw new Error(await readErrorMessage(response, `upload job file failed: ${response.status}`));
+    throw new Error(await readErrorMessage(response, `reuse uploaded archive failed: ${response.status}`));
   }
 
   return response.json() as Promise<PublicJobStatus>;
+}
+
+export async function calculateFileSha256(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export function buildJobDownloadUrl(jobCode: string, accessToken: string): string {
@@ -132,4 +169,46 @@ async function readErrorMessage(response: Response, fallbackMessage: string): Pr
   }
 
   return response.statusText || fallbackMessage;
+}
+
+function sendUploadRequest(
+  url: string,
+  formData: FormData,
+  onProgress?: (progress: number) => void
+): Promise<PublicJobStatus> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", url);
+
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) {
+        return;
+      }
+      onProgress(Math.max(0, Math.min(100, Math.round((event.loaded / event.total) * 100))));
+    };
+
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve(JSON.parse(request.responseText) as PublicJobStatus);
+        return;
+      }
+
+      reject(new Error(readXhrErrorMessage(request, `upload job file failed: ${request.status}`)));
+    };
+    request.onerror = () => reject(new Error("上传文件失败"));
+    request.send(formData);
+  });
+}
+
+function readXhrErrorMessage(request: XMLHttpRequest, fallbackMessage: string): string {
+  try {
+    const payload = JSON.parse(request.responseText) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    // Ignore non-JSON error bodies and fall back to the default message.
+  }
+
+  return request.statusText || fallbackMessage;
 }
