@@ -73,7 +73,7 @@ class ModelService:
 
             updated = repo.update_publish_state(
                 model_id,
-                enabled=bool(payload["enabled"]),
+                enabled=True if is_default_person_model else bool(payload["enabled"]),
                 visible_in_advanced_mode=bool(payload["visible_in_advanced_mode"]),
                 is_default_person_model=is_default_person_model,
             )
