@@ -3,10 +3,10 @@ from __future__ import annotations
 import hmac
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from backend.core.admin_auth import AdminTokenService, get_admin_token_service
+from backend.core.admin_auth import AdminTokenService, get_admin_token_service, is_admin_ip_whitelisted
 from backend.core.config import settings
 
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/admin", tags=["admin-auth"])
 
 
 class LoginRequest(BaseModel):
-    secret: str
+    secret: str = ""
 
 
 class LoginResponse(BaseModel):
@@ -24,8 +24,11 @@ class LoginResponse(BaseModel):
 @router.post("/login", response_model=LoginResponse)
 def admin_login(
     payload: LoginRequest,
+    request: Request,
     token_service: Annotated[AdminTokenService, Depends(get_admin_token_service)],
 ) -> LoginResponse:
+    if is_admin_ip_whitelisted(request):
+        return LoginResponse(token=token_service.issue())
     if not hmac.compare_digest(payload.secret, settings.admin_secret):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

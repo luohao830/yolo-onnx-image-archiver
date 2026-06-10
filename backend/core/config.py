@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     admin_secret: str = "dev-secret"
     admin_token_secret: str | None = None
     admin_token_ttl_seconds: int = 3600
+    admin_ip_whitelist: str = ""
 
     def resolve_runtime_root(self) -> Path:
         if self.runtime_root.is_absolute():

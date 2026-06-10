@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import ipaddress
 from functools import lru_cache
 from typing import Any
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from starlette.requests import Request
 
 from backend.core.config import settings
 
@@ -34,6 +36,46 @@ class AdminTokenService:
         if not isinstance(payload, dict) or payload.get("role") != "admin":
             raise AdminTokenError("invalid admin token")
         return dict(payload)
+
+
+def is_admin_ip_whitelisted(request: Request) -> bool:
+    client_ip = _resolve_client_ip(request)
+    if not client_ip:
+        return False
+
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+
+    for entry in _configured_admin_ip_whitelist():
+        try:
+            if "/" in entry:
+                if address in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif address == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+
+    return False
+
+
+def _resolve_client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    if request.client is None:
+        return ""
+    return request.client.host
+
+
+def _configured_admin_ip_whitelist() -> list[str]:
+    return [
+        item.strip()
+        for item in settings.admin_ip_whitelist.split(",")
+        if item.strip()
+    ]
 
 
 @lru_cache(maxsize=1)

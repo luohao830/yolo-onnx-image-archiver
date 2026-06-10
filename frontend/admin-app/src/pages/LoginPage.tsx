@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { adminLogin } from "../api/client";
 
@@ -13,6 +13,30 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [token, setToken] = useState(() => localStorage.getItem(ADMIN_TOKEN_KEY) ?? "");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function tryWhitelistLogin() {
+      try {
+        const result = await adminLogin("");
+        if (cancelled) {
+          return;
+        }
+        localStorage.setItem(ADMIN_TOKEN_KEY, result.token);
+        setToken(result.token);
+        onLogin?.(result.token);
+      } catch {
+        // 非白名单 IP 会正常失败，保留手动登录入口。
+      }
+    }
+
+    void tryWhitelistLogin();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onLogin]);
 
   async function handleSubmit() {
     if (!secret.trim() || isSubmitting) {

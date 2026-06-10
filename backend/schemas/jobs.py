@@ -15,6 +15,10 @@ class JobReceipt(BaseModel):
     status: str
 
 
+class ReuseUploadRequest(BaseModel):
+    content_sha256: str
+
+
 class PublicJobStatus(BaseModel):
     job_code: str
     mode: str
@@ -50,3 +54,16 @@ class AdminJobDetail(BaseModel):
     result_zip_available: bool = False
     download_ready: bool = False
     events: list[JobEvent] = []
+
+
+class AdminUploadedArchive(BaseModel):
+    id: int
+    content_sha256: str
+    original_filename: str
+    size_bytes: int
+    image_count: int
+    created_at: str
+
+
+class DeleteUploadedArchivesResponse(BaseModel):
+    deleted: int
