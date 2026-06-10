@@ -1,9 +1,7 @@
 import { useState } from "react";
 
 import {
-  calculateFileSha256,
   createJob,
-  reuseUploadedArchive,
   uploadJobFile,
   type CreateJobResponse,
   type JobStatus
@@ -13,8 +11,7 @@ import { UploadField } from "../components/UploadField";
 
 
 type ActiveJob = Pick<CreateJobResponse, "job_code" | "access_token" | "status">;
-type UploadPhase = "hashing" | "reusing" | "uploading" | "extracting";
-const MAX_PREUPLOAD_HASH_BYTES = 512 * 1024 * 1024;
+type UploadPhase = "uploading" | "extracting";
 
 interface UploadStage {
   phase: UploadPhase;
@@ -25,14 +22,8 @@ function isZipFile(file: File): boolean {
   return file.name.toLowerCase().endsWith(".zip");
 }
 
-function shouldCheckUploadReuse(file: File): boolean {
-  return isZipFile(file) && file.size <= MAX_PREUPLOAD_HASH_BYTES;
-}
-
 function getUploadStageLabel(phase: UploadPhase): string {
   const labels: Record<UploadPhase, string> = {
-    hashing: "计算文件指纹",
-    reusing: "检查复用缓存",
     uploading: "文件上传中",
     extracting: "正在解压"
   };
@@ -59,27 +50,8 @@ export function PersonFilterPage() {
 
     try {
       const created = await createJob("person_filter");
-      let contentSha256: string | undefined;
-
-      if (shouldCheckUploadReuse(selectedFile)) {
-        setUploadStage({ phase: "hashing", progress: 0 });
-        contentSha256 = await calculateFileSha256(selectedFile);
-        setUploadStage({ phase: "reusing", progress: 100 });
-        const reused = await reuseUploadedArchive(created.job_code, created.access_token, contentSha256);
-        if (reused) {
-          setActiveJob({
-            job_code: reused.job_code,
-            access_token: created.access_token,
-            status: reused.status
-          });
-          setUploadStage(null);
-          return;
-        }
-      }
-
       setUploadStage({ phase: "uploading", progress: 0 });
       const uploaded = await uploadJobFile(created.job_code, created.access_token, selectedFile, {
-        contentSha256,
         onProgress: (progress) => {
           setUploadStage({
             phase: progress >= 100 && isZipFile(selectedFile) ? "extracting" : "uploading",

@@ -1,5 +1,4 @@
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import zipfile
 
@@ -12,17 +11,15 @@ from backend.core.db import build_engine, create_all, session_scope
 from backend.db.models import JobRecord, ModelRecord
 from backend.main import app
 from backend.repositories.jobs import JobRepository
-from backend.repositories.uploaded_archives import UploadedArchiveRepository
 
 from backend.api.routes.public_jobs import (
     create_job,
     download_job_result,
     get_job,
     list_published_models,
-    reuse_uploaded_archive,
     upload_job_file,
 )
-from backend.schemas.jobs import CreateJobRequest, ReuseUploadRequest
+from backend.schemas.jobs import CreateJobRequest
 import backend.services.job_service as job_service
 from backend.services.job_service import JobService, get_job_service
 from backend.services.runtime_paths import RuntimePaths
@@ -117,7 +114,7 @@ def test_upload_public_person_filter_archive_marks_uploaded_and_submits_job(tmp_
         assert scheduler.submitted == [saved.id]
 
 
-def test_upload_public_archive_persists_hash_cache_and_reuses_without_second_upload(tmp_path: Path) -> None:
+def test_upload_public_archive_uploads_same_zip_to_independent_jobs(tmp_path: Path) -> None:
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
     service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
@@ -129,7 +126,6 @@ def test_upload_public_archive_persists_hash_cache_and_reuses_without_second_upl
     with zipfile.ZipFile(archive_bytes, "w") as zf:
         zf.writestr("nested/demo.jpg", b"image-bytes")
     content = archive_bytes.getvalue()
-    content_sha256 = job_service.hashlib.sha256(content).hexdigest()
 
     with session_scope(engine) as session:
         session.add(
@@ -148,29 +144,20 @@ def test_upload_public_archive_persists_hash_cache_and_reuses_without_second_upl
         first_receipt.job_code,
         first_receipt.access_token,
         file=UploadFile(file=BytesIO(content), filename="images.zip"),
-        content_sha256=content_sha256,
         service=service,
         scheduler=first_scheduler,
     )
 
-    archives = service.list_uploaded_archives()
-    assert len(archives) == 1
-    assert archives[0]["content_sha256"] == content_sha256
-    assert archives[0]["original_filename"] == "images.zip"
-    assert archives[0]["image_count"] == 1
-    assert first_payload.events[-1].event_type == "uploaded"
-
-    second_payload = reuse_uploaded_archive(
+    second_payload = upload_job_file(
         second_receipt.job_code,
         second_receipt.access_token,
-        payload=ReuseUploadRequest(content_sha256=content_sha256),
+        file=UploadFile(file=BytesIO(content), filename="images.zip"),
         service=service,
         scheduler=second_scheduler,
     )
 
+    assert first_payload.status == "uploaded"
     assert second_payload.status == "uploaded"
-    assert second_payload.events[-1].event_type == "uploaded"
-    assert second_payload.events[-1].payload_json["reused"] is True
 
     with session_scope(engine) as session:
         repo = JobRepository(session)
@@ -179,111 +166,10 @@ def test_upload_public_archive_persists_hash_cache_and_reuses_without_second_upl
         assert first_job is not None
         assert second_job is not None
         assert Path(first_job.input_path) != Path(second_job.input_path)
+        assert (Path(first_job.input_path) / "nested" / "demo.jpg").read_bytes() == b"image-bytes"
         assert (Path(second_job.input_path) / "nested" / "demo.jpg").read_bytes() == b"image-bytes"
+        assert first_scheduler.submitted == [first_job.id]
         assert second_scheduler.submitted == [second_job.id]
-
-
-def test_upload_public_archive_replaces_stale_cache_record(tmp_path: Path) -> None:
-    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
-    create_all(engine)
-    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
-    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
-    scheduler = _FakeScheduler()
-    archive_bytes = BytesIO()
-    with zipfile.ZipFile(archive_bytes, "w") as zf:
-        zf.writestr("demo.jpg", b"image-bytes")
-    content = archive_bytes.getvalue()
-    content_sha256 = job_service.hashlib.sha256(content).hexdigest()
-
-    with session_scope(engine) as session:
-        session.add(
-            ModelRecord(
-                name="person-default",
-                slug="person-default",
-                onnx_path="models/person.onnx",
-                model_kind="person_detector",
-                enabled=True,
-                visible_in_advanced_mode=True,
-                is_default_person_model=True,
-            )
-        )
-    UploadedArchiveRepository.create_for_engine(
-        engine,
-        content_sha256=content_sha256,
-        original_filename="missing.zip",
-        archive_path=str(tmp_path / "missing.zip"),
-        extracted_path=str(tmp_path / "missing"),
-        size_bytes=len(content),
-        image_count=1,
-    )
-
-    payload = upload_job_file(
-        receipt.job_code,
-        receipt.access_token,
-        file=UploadFile(file=BytesIO(content), filename="images.zip"),
-        content_sha256=content_sha256,
-        service=service,
-        scheduler=scheduler,
-    )
-
-    archives = service.list_uploaded_archives()
-    assert payload.status == "uploaded"
-    assert len(archives) == 1
-    assert archives[0]["original_filename"] == "images.zip"
-    assert Path(archives[0]["archive_path"]).is_file()
-
-
-def test_upload_public_archive_deduplicates_concurrent_same_hash_uploads(tmp_path: Path) -> None:
-    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
-    create_all(engine)
-    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
-    receipts = [
-        create_job(CreateJobRequest(mode="person_filter"), service=service),
-        create_job(CreateJobRequest(mode="person_filter"), service=service),
-    ]
-    archive_bytes = BytesIO()
-    with zipfile.ZipFile(archive_bytes, "w") as zf:
-        zf.writestr("demo.jpg", b"image-bytes")
-    content = archive_bytes.getvalue()
-    content_sha256 = job_service.hashlib.sha256(content).hexdigest()
-
-    with session_scope(engine) as session:
-        session.add(
-            ModelRecord(
-                name="person-default",
-                slug="person-default",
-                onnx_path="models/person.onnx",
-                model_kind="person_detector",
-                enabled=True,
-                visible_in_advanced_mode=True,
-                is_default_person_model=True,
-            )
-        )
-
-    def upload(index: int) -> str:
-        receipt = receipts[index]
-        service.accept_public_job_upload(
-            receipt.job_code,
-            receipt.access_token,
-            filename=f"images-{index}.zip",
-            file_obj=BytesIO(content),
-            content_sha256=content_sha256,
-        )
-        with session_scope(engine) as session:
-            saved = JobRepository(session).get_by_code(receipt.job_code)
-            assert saved is not None
-            assert saved.input_path is not None
-            return saved.input_path
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        input_paths = list(executor.map(upload, [0, 1]))
-
-    archives = service.list_uploaded_archives()
-    assert len(archives) == 1
-    assert Path(archives[0]["archive_path"]).is_file()
-    assert Path(archives[0]["extracted_path"]).is_dir()
-    assert (Path(input_paths[0]) / "demo.jpg").read_bytes() == b"image-bytes"
-    assert (Path(input_paths[1]) / "demo.jpg").read_bytes() == b"image-bytes"
 
 
 def test_upload_public_person_filter_rejects_archive_over_upload_limit(
@@ -412,8 +298,7 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "get" in schema["paths"]["/api/jobs/{job_code}"]
     assert "/api/jobs/{job_code}/upload" in schema["paths"]
     assert "post" in schema["paths"]["/api/jobs/{job_code}/upload"]
-    assert "/api/jobs/{job_code}/reuse-upload" in schema["paths"]
-    assert "post" in schema["paths"]["/api/jobs/{job_code}/reuse-upload"]
+    assert "/api/jobs/{job_code}/reuse-upload" not in schema["paths"]
     assert "/api/jobs/{job_code}/download" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}/download"]
 

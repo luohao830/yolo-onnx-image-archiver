@@ -5,7 +5,6 @@ import { ConfigsPage } from "./pages/ConfigsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { JobsPage } from "./pages/JobsPage";
 import { ModelsPage } from "./pages/ModelsPage";
-import { UploadedArchivesPage } from "./pages/UploadedArchivesPage";
 
 const ADMIN_TOKEN_KEY = "admin-token";
 const ADMIN_AUTO_LOGIN_DISABLED_KEY = "admin-auto-login-disabled";
@@ -21,7 +20,6 @@ function AdminLayout({ onLogout }: AdminLayoutProps) {
         <Link to="/models">模型管理</Link>
         <Link to="/configs">系统配置</Link>
         <Link to="/jobs">任务监控</Link>
-        <Link to="/uploads">压缩包管理</Link>
         <button className="nav-logout" type="button" onClick={onLogout}>
           登出
         </button>
@@ -30,7 +28,6 @@ function AdminLayout({ onLogout }: AdminLayoutProps) {
         <Route path="/models" element={<ModelsPage />} />
         <Route path="/configs" element={<ConfigsPage />} />
         <Route path="/jobs" element={<JobsPage />} />
-        <Route path="/uploads" element={<UploadedArchivesPage />} />
         <Route path="*" element={<Navigate to="/models" replace />} />
       </Routes>
     </main>
