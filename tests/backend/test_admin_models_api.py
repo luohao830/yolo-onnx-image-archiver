@@ -116,6 +116,45 @@ def test_admin_can_publish_model_and_switch_default_person_model(tmp_path: Path)
         assert second_saved.visible_in_advanced_mode is True
 
 
+def test_admin_setting_default_person_model_enables_model(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = ModelService(engine)
+
+    created = create_model(
+        CreateModelRequest(
+            name="helmet-person-v1",
+            slug="helmet-person-v1",
+            model_kind="person_detector",
+            onnx_path="models/helmet-person-v1.onnx",
+        ),
+        admin=ADMIN_CLAIMS,
+        service=service,
+    )
+
+    published = publish_model(
+        created.id,
+        PublishModelRequest(
+            enabled=False,
+            visible_in_advanced_mode=False,
+            is_default_person_model=True,
+        ),
+        admin=ADMIN_CLAIMS,
+        service=service,
+    )
+
+    assert published.enabled is True
+    assert published.visible_in_advanced_mode is False
+    assert published.is_default_person_model is True
+
+    with session_scope(engine) as session:
+        saved = session.get(ModelRecord, created.id)
+        assert saved is not None
+        assert saved.enabled is True
+        assert saved.visible_in_advanced_mode is False
+        assert saved.is_default_person_model is True
+
+
 def test_admin_can_refresh_onnx_models_from_models_dir(tmp_path: Path) -> None:
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)

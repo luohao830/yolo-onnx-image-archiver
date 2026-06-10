@@ -39,7 +39,7 @@ export function ModelsPage() {
 
   async function handleSetDefault(model: AdminModel) {
     const updated = await publishAdminModel(model.id, {
-      enabled: model.enabled,
+      enabled: true,
       visible_in_advanced_mode: model.visible_in_advanced_mode,
       is_default_person_model: true
     });

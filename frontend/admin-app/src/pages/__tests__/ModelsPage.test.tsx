@@ -53,8 +53,8 @@ describe("ModelsPage", () => {
         onnx_path: "models/helmet-person-v2.onnx",
         sidecar_path: null,
         model_kind: "person_detector",
-        enabled: true,
-        visible_in_advanced_mode: true,
+        enabled: false,
+        visible_in_advanced_mode: false,
         is_default_person_model: false
       }
     ]);
@@ -66,7 +66,7 @@ describe("ModelsPage", () => {
       sidecar_path: null,
       model_kind: "person_detector",
       enabled: true,
-      visible_in_advanced_mode: true,
+      visible_in_advanced_mode: false,
       is_default_person_model: true
     });
 
@@ -81,7 +81,7 @@ describe("ModelsPage", () => {
     await waitFor(() => {
       expect(publishAdminModel).toHaveBeenCalledWith(2, {
         enabled: true,
-        visible_in_advanced_mode: true,
+        visible_in_advanced_mode: false,
         is_default_person_model: true
       });
       expect(screen.getByText("默认人检模型")).toBeTruthy();
