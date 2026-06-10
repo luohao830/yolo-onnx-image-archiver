@@ -18,7 +18,7 @@
 - 主线平台由 `backend`、`user-app`、`admin-app` 和 `gateway` 4 个 Compose 服务组成。
 - 后端默认使用 SQLite，数据库文件位于 `runtime/app.db`；当前没有 MongoDB，也不使用 `fo_data/`。
 - 公开接口已支持创建任务凭证、人员筛选上传入队、查询任务状态/关键日志、下载已完成任务结果压缩包和列出高级模式可见模型。
-- 管理员接口已支持登录、模型创建/发布、并发配置、任务列表、任务详情、结果下载、取消和重试。
+- 管理员接口已支持登录、模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消和重试。
 - 公开前台的人员筛选模式已接入图片或 `.zip` 压缩包上传、归档解压、默认人员模型绑定和任务入队；高级模式的模型参数与文件上传提交尚未接入公开 API，修改文档或功能时必须明确这条边界。
 
 ## 构建、运行与开发
@@ -37,7 +37,7 @@
 
 - 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET` 和 `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`。
 - 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
-- Docker 后端将宿主机 `models/` 挂载为 `/data/models`，管理员后台创建模型记录时应填写容器内路径，例如 `/data/models/person.onnx`。
+- Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
 - Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制，修改体积语义时必须同步文档。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。

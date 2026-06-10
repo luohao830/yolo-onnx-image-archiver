@@ -1,12 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { listAdminModels, publishAdminModel } from "../../api/client";
+import { listAdminModels, publishAdminModel, refreshAdminModels, uploadAdminOnnxModel } from "../../api/client";
 import { ModelsPage } from "../ModelsPage";
 
 vi.mock("../../api/client", () => ({
   listAdminModels: vi.fn(),
-  publishAdminModel: vi.fn()
+  publishAdminModel: vi.fn(),
+  refreshAdminModels: vi.fn(),
+  uploadAdminOnnxModel: vi.fn()
 }));
 
 describe("ModelsPage", () => {
@@ -36,7 +38,8 @@ describe("ModelsPage", () => {
       expect(screen.getByRole("heading", { name: "模型管理" })).toBeTruthy();
       expect(screen.getByText("helmet-person-v1")).toBeTruthy();
       expect(screen.getByText("默认人检模型")).toBeTruthy();
-      expect(screen.getByRole("button", { name: "上传 ONNX" })).toBeTruthy();
+      expect(screen.getByLabelText("上传 ONNX")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "刷新模型目录" })).toBeTruthy();
       expect(screen.getByRole("button", { name: "设为默认人检模型" })).toBeTruthy();
     });
   });
@@ -82,6 +85,65 @@ describe("ModelsPage", () => {
         is_default_person_model: true
       });
       expect(screen.getByText("默认人检模型")).toBeTruthy();
+    });
+  });
+
+  it("refreshes models from the mounted models directory", async () => {
+    vi.mocked(listAdminModels).mockResolvedValue([]);
+    vi.mocked(refreshAdminModels).mockResolvedValue([
+      {
+        id: 3,
+        name: "person",
+        slug: "person",
+        onnx_path: "/data/models/person.onnx",
+        sidecar_path: null,
+        model_kind: "person_detector",
+        enabled: false,
+        visible_in_advanced_mode: false,
+        is_default_person_model: false
+      }
+    ]);
+
+    render(<ModelsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "刷新模型目录" }));
+
+    await waitFor(() => {
+      expect(refreshAdminModels).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("person")).toBeTruthy();
+      expect(screen.getByText("/data/models/person.onnx")).toBeTruthy();
+    });
+  });
+
+  it("uploads an onnx file and appends the created model", async () => {
+    vi.mocked(listAdminModels).mockResolvedValue([]);
+    vi.mocked(uploadAdminOnnxModel).mockResolvedValue({
+      id: 4,
+      name: "uploaded-person",
+      slug: "uploaded-person",
+      onnx_path: "/data/models/uploaded-person.onnx",
+      sidecar_path: null,
+      model_kind: "person_detector",
+      enabled: false,
+      visible_in_advanced_mode: false,
+      is_default_person_model: false
+    });
+    const file = new File(["onnx"], "uploaded-person.onnx", {
+      type: "application/octet-stream"
+    });
+
+    render(<ModelsPage />);
+
+    fireEvent.change(await screen.findByLabelText("上传 ONNX"), {
+      target: {
+        files: [file]
+      }
+    });
+
+    await waitFor(() => {
+      expect(uploadAdminOnnxModel).toHaveBeenCalledWith(file);
+      expect(screen.getByText("uploaded-person")).toBeTruthy();
+      expect(screen.getByText("/data/models/uploaded-person.onnx")).toBeTruthy();
     });
   });
 });
