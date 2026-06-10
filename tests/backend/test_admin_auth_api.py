@@ -19,6 +19,7 @@ def _set_admin_secret(monkeypatch: pytest.MonkeyPatch, secret: str = "dev-secret
     monkeypatch.setattr(settings, "admin_token_secret", None)
     monkeypatch.setattr(settings, "admin_token_ttl_seconds", 3600)
     monkeypatch.setattr(settings, "admin_ip_whitelist", "")
+    monkeypatch.setattr(settings, "admin_trusted_proxy_cidrs", "127.0.0.1/32,::1/128")
 
 
 def _request_for_client(
@@ -103,11 +104,12 @@ def test_admin_login_allows_whitelisted_ip_without_secret(monkeypatch: pytest.Mo
 def test_require_admin_allows_whitelisted_ip_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_admin_secret(monkeypatch)
     monkeypatch.setattr(settings, "admin_ip_whitelist", "10.0.0.7")
+    monkeypatch.setattr(settings, "admin_trusted_proxy_cidrs", "172.16.0.0/12")
 
     claims = require_admin(
         credentials=None,
         token_service=get_admin_token_service(),
-        request=_request_for_client("192.168.1.20", real_ip="10.0.0.7"),
+        request=_request_for_client("172.18.0.3", real_ip="10.0.0.7"),
     )
 
     assert claims["role"] == "admin"
@@ -123,6 +125,23 @@ def test_require_admin_does_not_trust_spoofed_forwarded_for(monkeypatch: pytest.
             credentials=None,
             token_service=get_admin_token_service(),
             request=_request_for_client("192.168.1.20", forwarded_for="10.0.0.7"),
+        )
+
+    assert error.value.status_code == 401
+
+
+def test_require_admin_does_not_trust_spoofed_real_ip_from_untrusted_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_admin_secret(monkeypatch)
+    monkeypatch.setattr(settings, "admin_ip_whitelist", "10.0.0.7")
+    monkeypatch.setattr(settings, "admin_trusted_proxy_cidrs", "172.16.0.0/12")
+
+    with pytest.raises(HTTPException) as error:
+        require_admin(
+            credentials=None,
+            token_service=get_admin_token_service(),
+            request=_request_for_client("192.168.1.20", real_ip="10.0.0.7"),
         )
 
     assert error.value.status_code == 401

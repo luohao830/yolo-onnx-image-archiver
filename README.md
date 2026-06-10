@@ -148,7 +148,8 @@ http://127.0.0.1:5174
 | `YOLO_PLATFORM_ADMIN_SECRET` | `dev-secret` | 管理员登录密钥，生产环境必须覆盖 |
 | `YOLO_PLATFORM_ADMIN_TOKEN_SECRET` | 同 `YOLO_PLATFORM_ADMIN_SECRET` | 管理员 token 签名密钥 |
 | `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS` | `3600` | 管理员 token 有效期 |
-| `YOLO_PLATFORM_ADMIN_IP_WHITELIST` | 空 | 管理员免密 IP 白名单，支持逗号分隔的 IP 或 CIDR；反代后优先读取 gateway 覆盖写入的 `X-Real-IP` |
+| `YOLO_PLATFORM_ADMIN_IP_WHITELIST` | 空 | 管理员免密 IP 白名单，支持逗号分隔的 IP 或 CIDR；受信代理后的请求可使用 gateway 覆盖写入的 `X-Real-IP` |
+| `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` | `127.0.0.1/32,::1/128` | 允许后端信任 `X-Real-IP` 的直连代理 IP 或 CIDR；Docker Compose 默认配置为 `172.16.0.0/12` |
 
 Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和新平台模型管理使用，并通过 Compose GPU reservation 向后端容器暴露 NVIDIA GPU。管理员模型列表会自动扫描该目录下的 `.onnx` 文件并导入缺失记录，记录中的模型路径使用 `/data/models/<model>.onnx` 形式。
 
