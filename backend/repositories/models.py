@@ -19,6 +19,12 @@ class ModelRepository:
             raise LookupError(f"model not found: {model_id}")
         return model
 
+    def get_by_slug(self, slug: str) -> ModelRecord | None:
+        return self.session.query(ModelRecord).filter_by(slug=slug).one_or_none()
+
+    def get_by_onnx_path(self, onnx_path: str) -> ModelRecord | None:
+        return self.session.query(ModelRecord).filter_by(onnx_path=onnx_path).one_or_none()
+
     def list_models(self) -> Sequence[ModelRecord]:
         return self.session.query(ModelRecord).order_by(ModelRecord.id.asc()).all()
 

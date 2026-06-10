@@ -91,6 +91,33 @@ export async function listAdminModels(): Promise<AdminModel[]> {
   return response.json() as Promise<AdminModel[]>;
 }
 
+export async function refreshAdminModels(): Promise<AdminModel[]> {
+  const response = await authorizedFetch("/admin/models/refresh", {
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `refresh admin models failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<AdminModel[]>;
+}
+
+export async function uploadAdminOnnxModel(file: File): Promise<AdminModel> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await authorizedFetch("/admin/models/upload", {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `upload admin model failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<AdminModel>;
+}
+
 export async function publishAdminModel(
   modelId: number,
   payload: PublishAdminModelPayload

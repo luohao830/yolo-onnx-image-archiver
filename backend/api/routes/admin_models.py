@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from backend.api.deps import require_admin
@@ -55,6 +55,34 @@ def create_model(
 ) -> ModelResponse:
     del admin
     created = service.create_model(payload.model_dump())
+    return ModelResponse(**created)
+
+
+@router.post("/refresh", response_model=list[ModelResponse])
+def refresh_models(
+    admin: Annotated[dict[str, Any], Depends(require_admin)],
+    service: Annotated[ModelService, Depends(get_model_service)],
+) -> list[ModelResponse]:
+    del admin
+    return [ModelResponse(**item) for item in service.refresh_models_from_directory()]
+
+
+@router.post("/upload", response_model=ModelResponse, status_code=status.HTTP_201_CREATED)
+def upload_onnx_model(
+    file: Annotated[UploadFile, File()],
+    admin: Annotated[dict[str, Any], Depends(require_admin)],
+    service: Annotated[ModelService, Depends(get_model_service)],
+) -> ModelResponse:
+    del admin
+    try:
+        created = service.upload_onnx_model(
+            filename=file.filename or "",
+            file_obj=file.file,
+        )
+    except FileExistsError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ModelResponse(**created)
 
 

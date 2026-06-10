@@ -149,7 +149,7 @@ http://127.0.0.1:5174
 | `YOLO_PLATFORM_ADMIN_TOKEN_SECRET` | 同 `YOLO_PLATFORM_ADMIN_SECRET` | 管理员 token 签名密钥 |
 | `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS` | `3600` | 管理员 token 有效期 |
 
-Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路使用，并通过 Compose GPU reservation 向后端容器暴露 NVIDIA GPU。通过管理员后台创建模型记录时，容器内推荐填写 `/data/models/<model>.onnx` 形式的模型路径。
+Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和新平台模型管理使用，并通过 Compose GPU reservation 向后端容器暴露 NVIDIA GPU。管理员模型列表会自动扫描该目录下的 `.onnx` 文件并导入缺失记录，记录中的模型路径使用 `/data/models/<model>.onnx` 形式。
 
 ## 管理员后台
 
@@ -165,8 +165,11 @@ dev-secret
 2. 启动 Docker Compose。
 3. 访问 `http://127.0.0.1:58000/admin/`。
 4. 使用管理员密钥登录。
-5. 在模型管理页创建模型记录，填写容器内模型路径，例如 `/data/models/person.onnx`。
-6. 发布模型；如需作为人员筛选默认模型，`model_kind` 必须为 `person_detector`。
+5. 进入模型管理页，列表加载或点击“刷新模型目录”会自动导入缺失的 `.onnx` 记录。
+6. 也可以在模型管理页直接上传 `.onnx` 文件，后端会保存到 `MODELS_DIR` 并创建模型记录。
+7. 发布模型；如需作为人员筛选默认模型，`model_kind` 必须为 `person_detector`。
+
+自动导入和上传只创建未发布模型记录，不会自动启用、不会自动对高级模式可见，也不会自动设为默认人员模型。
 
 系统配置页当前支持调整：
 
@@ -191,6 +194,8 @@ dev-secret
 - `POST /api/admin/login`
 - `GET /api/admin/models`
 - `POST /api/admin/models`
+- `POST /api/admin/models/refresh`
+- `POST /api/admin/models/upload`
 - `PATCH /api/admin/models/{model_id}/publish`
 - `GET /api/admin/configs`
 - `PUT /api/admin/configs/concurrency`
