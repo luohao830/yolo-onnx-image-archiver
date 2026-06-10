@@ -22,6 +22,18 @@ class ModelRepository:
     def list_models(self) -> Sequence[ModelRecord]:
         return self.session.query(ModelRecord).order_by(ModelRecord.id.asc()).all()
 
+    def get_default_person_model(self) -> ModelRecord | None:
+        return (
+            self.session.query(ModelRecord)
+            .filter_by(
+                enabled=True,
+                is_default_person_model=True,
+                model_kind="person_detector",
+            )
+            .order_by(ModelRecord.id.asc())
+            .first()
+        )
+
     def create_model(
         self,
         *,

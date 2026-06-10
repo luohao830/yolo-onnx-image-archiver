@@ -87,6 +87,32 @@ export async function getJobStatus(
   return response.json() as Promise<PublicJobStatus>;
 }
 
+export async function uploadJobFile(
+  jobCode: string,
+  accessToken: string,
+  file: File
+): Promise<PublicJobStatus> {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(
+    `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/upload?${searchParams.toString()}`,
+    {
+      method: "POST",
+      body: formData
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `upload job file failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<PublicJobStatus>;
+}
+
 export function buildJobDownloadUrl(jobCode: string, accessToken: string): string {
   const searchParams = new URLSearchParams({
     access_token: accessToken

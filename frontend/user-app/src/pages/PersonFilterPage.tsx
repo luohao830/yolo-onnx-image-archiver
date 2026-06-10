@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { createJob, type CreateJobResponse, type JobStatus } from "../api/client";
+import { createJob, uploadJobFile, type CreateJobResponse, type JobStatus } from "../api/client";
 import { JobProgressPanel } from "../components/JobProgressPanel";
 import { UploadField } from "../components/UploadField";
 
@@ -24,9 +24,14 @@ export function PersonFilterPage() {
 
     try {
       const created = await createJob("person_filter");
-      setActiveJob(created);
+      const uploaded = await uploadJobFile(created.job_code, created.access_token, selectedFile);
+      setActiveJob({
+        job_code: uploaded.job_code,
+        access_token: created.access_token,
+        status: uploaded.status
+      });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "创建任务失败");
+      setErrorMessage(error instanceof Error ? error.message : "提交任务失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -53,9 +58,9 @@ export function PersonFilterPage() {
           onFileChange={setSelectedFile}
         />
         <button className="button button--primary" type="button" disabled={!selectedFile || isSubmitting} onClick={handleSubmit}>
-          {isSubmitting ? "创建中..." : "开始处理"}
+          {isSubmitting ? "提交中..." : "开始处理"}
         </button>
-        <p className="muted">文件上传接口接入后会随任务一并提交；当前页面已按处理进度与下载流程设计。</p>
+        <p className="muted">上传成功后任务会进入队列，并在这里显示处理进度和结果下载入口。</p>
       </section>
 
       {errorMessage ? <p role="alert">{errorMessage}</p> : null}

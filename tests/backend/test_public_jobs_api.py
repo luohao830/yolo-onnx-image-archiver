@@ -1,7 +1,10 @@
 from pathlib import Path
+from io import BytesIO
+import zipfile
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import UploadFile
 
 from backend.core.config import Settings, settings
 from backend.core.db import build_engine, create_all, session_scope
@@ -9,10 +12,25 @@ from backend.db.models import JobRecord, ModelRecord
 from backend.main import app
 from backend.repositories.jobs import JobRepository
 
-from backend.api.routes.public_jobs import create_job, download_job_result, get_job, list_published_models
+from backend.api.routes.public_jobs import (
+    create_job,
+    download_job_result,
+    get_job,
+    list_published_models,
+    upload_job_file,
+)
 from backend.schemas.jobs import CreateJobRequest
 from backend.services.job_service import JobService, get_job_service
+from backend.services.runtime_paths import RuntimePaths
 from backend.services.model_service import ModelService
+
+
+class _FakeScheduler:
+    def __init__(self) -> None:
+        self.submitted: list[int] = []
+
+    def submit(self, job_id: int) -> None:
+        self.submitted.append(job_id)
 
 
 def test_create_public_job_returns_receipt_and_persists_job(tmp_path: Path) -> None:
@@ -46,6 +64,53 @@ def test_get_public_job_returns_status_when_token_matches(tmp_path: Path) -> Non
     assert payload.mode == "advanced"
     assert payload.status == "created"
     assert payload.error_message is None
+
+
+def test_upload_public_person_filter_archive_marks_uploaded_and_submits_job(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
+    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
+    scheduler = _FakeScheduler()
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("nested/demo.jpg", b"image-bytes")
+    archive.seek(0)
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="person-default",
+                slug="person-default",
+                onnx_path="models/person.onnx",
+                model_kind="person_detector",
+                enabled=True,
+                visible_in_advanced_mode=True,
+                is_default_person_model=True,
+            )
+        )
+
+    payload = upload_job_file(
+        receipt.job_code,
+        receipt.access_token,
+        file=UploadFile(file=archive, filename="images.zip"),
+        service=service,
+        scheduler=scheduler,
+    )
+
+    assert payload.status == "uploaded"
+    assert payload.progress == 20
+    assert payload.events[0].event_type == "uploaded"
+    assert scheduler.submitted
+
+    with session_scope(engine) as session:
+        repo = JobRepository(session)
+        saved = repo.get_by_code(receipt.job_code)
+        assert saved is not None
+        assert saved.model_id is not None
+        assert saved.input_path is not None
+        assert (Path(saved.input_path) / "nested" / "demo.jpg").read_bytes() == b"image-bytes"
+        assert scheduler.submitted == [saved.id]
 
 
 def test_get_public_job_returns_progress_events_and_download_state(tmp_path: Path) -> None:
@@ -131,6 +196,8 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "get" in schema["paths"]["/api/jobs/models"]
     assert "/api/jobs/{job_code}" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}"]
+    assert "/api/jobs/{job_code}/upload" in schema["paths"]
+    assert "post" in schema["paths"]["/api/jobs/{job_code}/upload"]
     assert "/api/jobs/{job_code}/download" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}/download"]
 

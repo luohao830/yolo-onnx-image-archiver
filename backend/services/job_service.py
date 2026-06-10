@@ -3,15 +3,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import shutil
+import tempfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, BinaryIO, Mapping
 
 from sqlalchemy.engine import Engine
 
 from backend.core.config import settings
 from backend.core.db import build_engine, create_all, session_scope
 from backend.repositories.jobs import JobRepository
+from backend.repositories.models import ModelRepository
+from backend.services.archive_ingest import SUPPORTED_IMAGE_SUFFIXES, extract_upload_archive
+from backend.services.runtime_paths import RuntimePaths
 
 
 DEFAULT_JOB_PAYLOAD: dict[str, Any] = {
@@ -81,8 +86,9 @@ def build_job_event(
 
 
 class JobService:
-    def __init__(self, engine: Engine) -> None:
+    def __init__(self, engine: Engine, runtime_paths: RuntimePaths | None = None) -> None:
         self.engine = engine
+        self.runtime_paths = runtime_paths or RuntimePaths(settings.resolve_runtime_root())
 
     def create_public_job(self, mode: str) -> dict[str, str]:
         payload_json = self._build_payload_for_mode(mode)
@@ -117,6 +123,38 @@ class JobService:
                 return None
             events = repo.list_events(job.id)
             return self._serialize_public_job(job, events)
+
+    def accept_public_job_upload(
+        self,
+        job_code: str,
+        access_token: str,
+        *,
+        filename: str,
+        file_obj: BinaryIO,
+    ) -> tuple[int, dict[str, Any]]:
+        self.runtime_paths.ensure()
+        job_id, model_id = self._resolve_upload_targets(job_code, access_token)
+        input_dir = self._persist_public_upload(job_code, filename, file_obj)
+
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get(job_id)
+            if job.status != "created":
+                raise ValueError("job has already been uploaded or started")
+            updated = repo.mark_uploaded(
+                job.id,
+                input_path=str(input_dir),
+                model_id=model_id,
+            )
+            repo.record_event(
+                job.id,
+                **build_job_event(
+                    event_type="uploaded",
+                    message="文件已接收，任务已进入队列",
+                    payload_json={"total": self._count_input_images(input_dir)},
+                ),
+            )
+            return updated.id, self._serialize_public_job(updated, repo.list_events(updated.id))
 
     def list_admin_jobs(self) -> list[dict[str, Any]]:
         with session_scope(self.engine) as session:
@@ -167,6 +205,69 @@ class JobService:
                 raise ValueError("only failed jobs can be retried")
             updated = repo.reset_for_retry(job_id)
             return self._serialize_admin_job(updated, repo.list_events(job_id))
+
+    def _resolve_upload_targets(self, job_code: str, access_token: str) -> tuple[int, int]:
+        with session_scope(self.engine) as session:
+            job_repo = JobRepository(session)
+            job = job_repo.get_by_code(job_code)
+            if job is None:
+                raise LookupError("job not found")
+            if not self._verify_access_token(access_token, job.access_token_hash):
+                raise LookupError("job not found")
+            if job.mode != "person_filter":
+                raise ValueError("only person_filter jobs accept public uploads")
+            if job.status != "created":
+                raise ValueError("job has already been uploaded or started")
+
+            model = ModelRepository(session).get_default_person_model()
+            if model is None:
+                raise ValueError("default person model is not configured")
+            return job.id, model.id
+
+    def _persist_public_upload(self, job_code: str, filename: str, file_obj: BinaryIO) -> Path:
+        safe_filename = Path(filename or "upload").name or "upload"
+        suffix = Path(safe_filename).suffix.lower()
+        if suffix != ".zip" and suffix not in SUPPORTED_IMAGE_SUFFIXES:
+            raise ValueError("仅支持图片文件或 zip 压缩包")
+
+        upload_dir = self.runtime_paths.uploads / job_code
+        input_dir = self.runtime_paths.jobs / job_code / "input"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        raw_path = upload_dir / safe_filename
+
+        with raw_path.open("wb") as dst:
+            shutil.copyfileobj(file_obj, dst)
+
+        if input_dir.exists():
+            shutil.rmtree(input_dir)
+
+        if suffix == ".zip":
+            extracted = extract_upload_archive(raw_path, input_dir)
+            if not extracted:
+                raise ValueError("压缩包内未找到支持的图片")
+            return input_dir
+
+        self._copy_single_image_to_input(raw_path, input_dir)
+        return input_dir
+
+    @staticmethod
+    def _copy_single_image_to_input(source: Path, input_dir: Path) -> None:
+        input_dir.parent.mkdir(parents=True, exist_ok=True)
+        temp_input_dir = Path(tempfile.mkdtemp(prefix=f".{input_dir.name}-", dir=input_dir.parent))
+        try:
+            shutil.copy2(source, temp_input_dir / source.name)
+            temp_input_dir.replace(input_dir)
+        except Exception:
+            shutil.rmtree(temp_input_dir, ignore_errors=True)
+            raise
+
+    @staticmethod
+    def _count_input_images(input_dir: Path) -> int:
+        return sum(
+            1
+            for path in input_dir.rglob("*")
+            if path.is_file() and path.suffix.lower() in SUPPORTED_IMAGE_SUFFIXES
+        )
 
     def _generate_unique_job_code(self, repo: JobRepository) -> str:
         for _ in range(8):

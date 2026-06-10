@@ -50,10 +50,18 @@ class JobRepository:
             .all()
         )
 
-    def mark_uploaded(self, job_id: int, *, input_path: str) -> JobRecord:
+    def mark_uploaded(
+        self,
+        job_id: int,
+        *,
+        input_path: str,
+        model_id: int | None = None,
+    ) -> JobRecord:
         job = self._get_required(job_id)
         job.status = "uploaded"
         job.input_path = input_path
+        if model_id is not None:
+            job.model_id = model_id
         job.cancel_requested = False
         self.session.flush()
         return job
