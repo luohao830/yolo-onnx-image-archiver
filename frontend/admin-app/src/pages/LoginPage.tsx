@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { adminLogin } from "../api/client";
 
 const ADMIN_TOKEN_KEY = "admin-token";
+const ADMIN_AUTO_LOGIN_DISABLED_KEY = "admin-auto-login-disabled";
 
 interface LoginPageProps {
   onLogin?: (token: string) => void;
@@ -17,6 +18,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   useEffect(() => {
     let cancelled = false;
 
+    if (localStorage.getItem(ADMIN_AUTO_LOGIN_DISABLED_KEY) === "1") {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     async function tryWhitelistLogin() {
       try {
         const result = await adminLogin("");
@@ -24,6 +31,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           return;
         }
         localStorage.setItem(ADMIN_TOKEN_KEY, result.token);
+        localStorage.removeItem(ADMIN_AUTO_LOGIN_DISABLED_KEY);
         setToken(result.token);
         onLogin?.(result.token);
       } catch {
@@ -49,6 +57,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
     try {
       const result = await adminLogin(secret.trim());
       localStorage.setItem(ADMIN_TOKEN_KEY, result.token);
+      localStorage.removeItem(ADMIN_AUTO_LOGIN_DISABLED_KEY);
       setToken(result.token);
       onLogin?.(result.token);
     } catch (error) {

@@ -14,6 +14,7 @@ import { UploadField } from "../components/UploadField";
 
 type ActiveJob = Pick<CreateJobResponse, "job_code" | "access_token" | "status">;
 type UploadPhase = "hashing" | "reusing" | "uploading" | "extracting";
+const MAX_PREUPLOAD_HASH_BYTES = 512 * 1024 * 1024;
 
 interface UploadStage {
   phase: UploadPhase;
@@ -22,6 +23,10 @@ interface UploadStage {
 
 function isZipFile(file: File): boolean {
   return file.name.toLowerCase().endsWith(".zip");
+}
+
+function shouldCheckUploadReuse(file: File): boolean {
+  return isZipFile(file) && file.size <= MAX_PREUPLOAD_HASH_BYTES;
 }
 
 function getUploadStageLabel(phase: UploadPhase): string {
@@ -56,7 +61,7 @@ export function PersonFilterPage() {
       const created = await createJob("person_filter");
       let contentSha256: string | undefined;
 
-      if (isZipFile(selectedFile)) {
+      if (shouldCheckUploadReuse(selectedFile)) {
         setUploadStage({ phase: "hashing", progress: 0 });
         contentSha256 = await calculateFileSha256(selectedFile);
         setUploadStage({ phase: "reusing", progress: 100 });
