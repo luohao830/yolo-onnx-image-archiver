@@ -3,6 +3,7 @@ opencv-python-headless
 onnxruntime-gpu
 gradio
 fastapi
+python-multipart
 uvicorn
 sqlalchemy
 pydantic-settings

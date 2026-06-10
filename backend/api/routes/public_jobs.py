@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from backend.schemas.jobs import CreateJobRequest, JobReceipt, PublicJobStatus, PublishedModel
 from backend.services.job_service import JobService, get_job_service
 from backend.services.model_service import ModelService, get_model_service
+from backend.services.scheduler_service import get_job_scheduler
+from backend.workers.scheduler import Scheduler
 
 
 router = APIRouter(prefix="/jobs", tags=["public-jobs"])
@@ -38,6 +40,30 @@ def get_job(
     job = service.get_public_job(job_code, access_token)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    return PublicJobStatus(**job)
+
+
+@router.post("/{job_code}/upload", response_model=PublicJobStatus)
+def upload_job_file(
+    job_code: str,
+    access_token: str,
+    file: Annotated[UploadFile, File()],
+    service: Annotated[JobService, Depends(get_job_service)],
+    scheduler: Annotated[Scheduler, Depends(get_job_scheduler)],
+) -> PublicJobStatus:
+    try:
+        job_id, job = service.accept_public_job_upload(
+            job_code,
+            access_token,
+            filename=file.filename or "upload",
+            file_obj=file.file,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    scheduler.submit(job_id)
     return PublicJobStatus(**job)
 
 
