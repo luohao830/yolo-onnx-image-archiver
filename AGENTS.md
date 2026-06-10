@@ -38,7 +38,7 @@
 - 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET` 和 `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`。
 - 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`，管理员后台创建模型记录时应填写容器内路径，例如 `/data/models/person.onnx`。
-- Gateway Nginx 通过 `client_max_body_size 1024m` 允许人员筛选模式上传图片或压缩包；修改上传体积限制时必须同步后端归档解压上限语义与文档。
+- Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制，修改体积语义时必须同步文档。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 

@@ -9,15 +9,12 @@ from pathlib import Path, PurePosixPath
 SUPPORTED_IMAGE_SUFFIXES = frozenset(
     {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".gif"}
 )
-MAX_EXTRACTED_IMAGE_COUNT = 1000
-MAX_EXTRACTED_TOTAL_BYTES = 1024 * 1024 * 1024
 
 
 def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     resolved_out_dir = out_dir.resolve()
     members: list[tuple[zipfile.ZipInfo, Path]] = []
-    total_bytes = 0
 
     with zipfile.ZipFile(archive_path) as zf:
         for info in zf.infolist():
@@ -28,12 +25,6 @@ def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
                 continue
 
             members.append((info, target))
-            total_bytes += info.file_size
-
-            if len(members) > MAX_EXTRACTED_IMAGE_COUNT:
-                raise ValueError("压缩包图片数量超限")
-            if total_bytes > MAX_EXTRACTED_TOTAL_BYTES:
-                raise ValueError("压缩包解压总大小超限")
 
     temp_out_dir = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}-", dir=out_dir.parent))
     extracted = [out_dir / target.relative_to(resolved_out_dir) for _, target in members]
