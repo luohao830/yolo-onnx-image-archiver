@@ -48,4 +48,13 @@ describe("LoginPage", () => {
       expect(screen.getByRole("alert").textContent).toBe("invalid secret");
     });
   });
+
+  it("skips automatic whitelist login after explicit logout", () => {
+    localStorage.setItem("admin-auto-login-disabled", "1");
+
+    render(<LoginPage />);
+
+    expect(adminLogin).not.toHaveBeenCalledWith("");
+    expect(screen.getByLabelText("管理员密钥")).toBeTruthy();
+  });
 });

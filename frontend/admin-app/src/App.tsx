@@ -8,6 +8,7 @@ import { ModelsPage } from "./pages/ModelsPage";
 import { UploadedArchivesPage } from "./pages/UploadedArchivesPage";
 
 const ADMIN_TOKEN_KEY = "admin-token";
+const ADMIN_AUTO_LOGIN_DISABLED_KEY = "admin-auto-login-disabled";
 
 interface AdminLayoutProps {
   onLogout: () => void;
@@ -41,6 +42,7 @@ export function App() {
 
   function handleLogout() {
     localStorage.removeItem(ADMIN_TOKEN_KEY);
+    localStorage.setItem(ADMIN_AUTO_LOGIN_DISABLED_KEY, "1");
     setToken("");
   }
 

@@ -39,7 +39,7 @@
 - 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
 - Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包按 SHA-256 缓存在 `runtime/uploads/archives/`，后台可删除指定缓存；修改体积或缓存语义时必须同步文档。
-- 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端优先读取 `X-Forwarded-For` 首个地址用于白名单判断。
+- 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端优先读取 gateway 覆盖写入的 `X-Real-IP` 用于白名单判断，不信任客户端传入的 `X-Forwarded-For`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 

@@ -43,6 +43,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "登出" }));
 
     expect(localStorage.getItem("admin-token")).toBeNull();
+    expect(localStorage.getItem("admin-auto-login-disabled")).toBe("1");
     expect(screen.getByLabelText("管理员密钥")).toBeTruthy();
   });
 });

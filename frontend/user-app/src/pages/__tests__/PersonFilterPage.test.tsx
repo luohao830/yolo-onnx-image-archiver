@@ -155,4 +155,52 @@ describe("PersonFilterPage", () => {
       expect(getJobStatus).toHaveBeenCalledWith("JOB-CACHED", "token-cached");
     });
   });
+
+  it("skips pre-upload hash reuse for oversized zip files", async () => {
+    vi.mocked(createJob).mockResolvedValue({
+      job_code: "JOB-LARGE",
+      access_token: "token-large",
+      status: "created"
+    });
+    vi.mocked(uploadJobFile).mockResolvedValue({
+      job_code: "JOB-LARGE",
+      mode: "person_filter",
+      status: "uploaded",
+      progress: 100,
+      download_ready: false,
+      events: []
+    });
+    vi.mocked(getJobStatus).mockResolvedValue({
+      job_code: "JOB-LARGE",
+      mode: "person_filter",
+      status: "running",
+      progress: 0,
+      download_ready: false,
+      events: []
+    });
+
+    render(<PersonFilterPage />);
+
+    const file = new File(["demo"], "large.zip", { type: "application/zip" });
+    Object.defineProperty(file, "size", {
+      value: 1024 * 1024 * 1024
+    });
+    fireEvent.change(screen.getByLabelText("上传图片或压缩包"), {
+      target: {
+        files: [file]
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始处理" }));
+
+    await waitFor(() => {
+      expect(calculateFileSha256).not.toHaveBeenCalled();
+      expect(reuseUploadedArchive).not.toHaveBeenCalled();
+      expect(uploadJobFile).toHaveBeenCalledWith(
+        "JOB-LARGE",
+        "token-large",
+        file,
+        expect.objectContaining({ contentSha256: undefined })
+      );
+    });
+  });
 });

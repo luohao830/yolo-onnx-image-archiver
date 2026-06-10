@@ -62,9 +62,9 @@ def is_admin_ip_whitelisted(request: Request) -> bool:
 
 
 def _resolve_client_ip(request: Request) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if forwarded_for:
-        return forwarded_for.split(",", 1)[0].strip()
+    real_ip = request.headers.get("x-real-ip", "").strip()
+    if real_ip:
+        return real_ip
     if request.client is None:
         return ""
     return request.client.host

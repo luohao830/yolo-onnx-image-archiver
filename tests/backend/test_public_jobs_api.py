@@ -1,4 +1,5 @@
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import zipfile
 
@@ -230,6 +231,59 @@ def test_upload_public_archive_replaces_stale_cache_record(tmp_path: Path) -> No
     assert len(archives) == 1
     assert archives[0]["original_filename"] == "images.zip"
     assert Path(archives[0]["archive_path"]).is_file()
+
+
+def test_upload_public_archive_deduplicates_concurrent_same_hash_uploads(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
+    receipts = [
+        create_job(CreateJobRequest(mode="person_filter"), service=service),
+        create_job(CreateJobRequest(mode="person_filter"), service=service),
+    ]
+    archive_bytes = BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as zf:
+        zf.writestr("demo.jpg", b"image-bytes")
+    content = archive_bytes.getvalue()
+    content_sha256 = job_service.hashlib.sha256(content).hexdigest()
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="person-default",
+                slug="person-default",
+                onnx_path="models/person.onnx",
+                model_kind="person_detector",
+                enabled=True,
+                visible_in_advanced_mode=True,
+                is_default_person_model=True,
+            )
+        )
+
+    def upload(index: int) -> str:
+        receipt = receipts[index]
+        service.accept_public_job_upload(
+            receipt.job_code,
+            receipt.access_token,
+            filename=f"images-{index}.zip",
+            file_obj=BytesIO(content),
+            content_sha256=content_sha256,
+        )
+        with session_scope(engine) as session:
+            saved = JobRepository(session).get_by_code(receipt.job_code)
+            assert saved is not None
+            assert saved.input_path is not None
+            return saved.input_path
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        input_paths = list(executor.map(upload, [0, 1]))
+
+    archives = service.list_uploaded_archives()
+    assert len(archives) == 1
+    assert Path(archives[0]["archive_path"]).is_file()
+    assert Path(archives[0]["extracted_path"]).is_dir()
+    assert (Path(input_paths[0]) / "demo.jpg").read_bytes() == b"image-bytes"
+    assert (Path(input_paths[1]) / "demo.jpg").read_bytes() == b"image-bytes"
 
 
 def test_upload_public_person_filter_rejects_archive_over_upload_limit(

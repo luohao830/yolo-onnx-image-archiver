@@ -21,10 +21,16 @@ def _set_admin_secret(monkeypatch: pytest.MonkeyPatch, secret: str = "dev-secret
     monkeypatch.setattr(settings, "admin_ip_whitelist", "")
 
 
-def _request_for_client(host: str, forwarded_for: str | None = None) -> Request:
+def _request_for_client(
+    host: str,
+    forwarded_for: str | None = None,
+    real_ip: str | None = None,
+) -> Request:
     headers = []
     if forwarded_for is not None:
         headers.append((b"x-forwarded-for", forwarded_for.encode("utf-8")))
+    if real_ip is not None:
+        headers.append((b"x-real-ip", real_ip.encode("utf-8")))
     return Request(
         {
             "type": "http",
@@ -101,11 +107,25 @@ def test_require_admin_allows_whitelisted_ip_without_token(monkeypatch: pytest.M
     claims = require_admin(
         credentials=None,
         token_service=get_admin_token_service(),
-        request=_request_for_client("192.168.1.20", forwarded_for="10.0.0.7"),
+        request=_request_for_client("192.168.1.20", real_ip="10.0.0.7"),
     )
 
     assert claims["role"] == "admin"
     assert claims["auth_method"] == "ip_whitelist"
+
+
+def test_require_admin_does_not_trust_spoofed_forwarded_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_admin_secret(monkeypatch)
+    monkeypatch.setattr(settings, "admin_ip_whitelist", "10.0.0.7")
+
+    with pytest.raises(HTTPException) as error:
+        require_admin(
+            credentials=None,
+            token_service=get_admin_token_service(),
+            request=_request_for_client("192.168.1.20", forwarded_for="10.0.0.7"),
+        )
+
+    assert error.value.status_code == 401
 
 
 def test_openapi_contains_admin_login_route() -> None:

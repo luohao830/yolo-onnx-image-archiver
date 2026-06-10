@@ -6,6 +6,7 @@ import re
 import secrets
 import shutil
 import tempfile
+import threading
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, BinaryIO, Mapping
@@ -70,6 +71,8 @@ STATUS_PROGRESS = {
 }
 MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024 * 1024
 SHA256_PATTERN = re.compile(r"^[a-fA-F0-9]{64}$")
+_ARCHIVE_LOCKS: dict[str, threading.Lock] = {}
+_ARCHIVE_LOCKS_GUARD = threading.Lock()
 
 
 class UploadTooLargeError(ValueError):
@@ -332,16 +335,17 @@ class JobService:
             shutil.rmtree(input_dir)
 
         if suffix == ".zip":
-            archive = self._get_available_uploaded_archive(actual_sha256)
-            if archive is None:
-                archive = self._cache_uploaded_archive(
-                    raw_path,
-                    safe_filename=safe_filename,
-                    content_sha256=actual_sha256,
-                    size_bytes=size_bytes,
-                )
-            else:
-                raw_path.unlink(missing_ok=True)
+            with self._archive_lock(actual_sha256):
+                archive = self._get_available_uploaded_archive(actual_sha256)
+                if archive is None:
+                    archive = self._cache_uploaded_archive(
+                        raw_path,
+                        safe_filename=safe_filename,
+                        content_sha256=actual_sha256,
+                        size_bytes=size_bytes,
+                    )
+                else:
+                    raw_path.unlink(missing_ok=True)
 
             self._copy_cached_extract_to_input(Path(archive["extracted_path"]), input_dir)
             return (
@@ -454,6 +458,13 @@ class JobService:
             archive = UploadedArchiveRepository(session).get(archive_id)
             if archive is not None:
                 session.delete(archive)
+
+    @staticmethod
+    def _archive_lock(content_sha256: str) -> threading.Lock:
+        with _ARCHIVE_LOCKS_GUARD:
+            if content_sha256 not in _ARCHIVE_LOCKS:
+                _ARCHIVE_LOCKS[content_sha256] = threading.Lock()
+            return _ARCHIVE_LOCKS[content_sha256]
 
     @staticmethod
     def _copy_cached_extract_to_input(source_dir: Path, input_dir: Path) -> None:
