@@ -3,10 +3,10 @@ import re
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MIN_UPLOAD_LIMIT_BYTES = 1024 * 1024 * 1024
+MIN_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024 * 1024
 
 
-def test_gateway_upload_body_limit_matches_backend_archive_limit() -> None:
+def test_gateway_upload_body_limit_allows_100g_uploads() -> None:
     config = (PROJECT_ROOT / "gateway" / "nginx.conf").read_text(encoding="utf-8")
     match = re.search(r"client_max_body_size\s+(\d+)([kKmMgG]?)\s*;", config)
 

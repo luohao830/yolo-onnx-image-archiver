@@ -20,6 +20,7 @@ from backend.api.routes.public_jobs import (
     upload_job_file,
 )
 from backend.schemas.jobs import CreateJobRequest
+import backend.services.job_service as job_service
 from backend.services.job_service import JobService, get_job_service
 from backend.services.runtime_paths import RuntimePaths
 from backend.services.model_service import ModelService
@@ -111,6 +112,47 @@ def test_upload_public_person_filter_archive_marks_uploaded_and_submits_job(tmp_
         assert saved.input_path is not None
         assert (Path(saved.input_path) / "nested" / "demo.jpg").read_bytes() == b"image-bytes"
         assert scheduler.submitted == [saved.id]
+
+
+def test_upload_public_person_filter_rejects_archive_over_upload_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
+    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
+    scheduler = _FakeScheduler()
+    monkeypatch.setattr(job_service, "MAX_UPLOAD_FILE_BYTES", 10, raising=False)
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("demo.jpg", b"image-bytes")
+    archive.seek(0)
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="person-default",
+                slug="person-default",
+                onnx_path="models/person.onnx",
+                model_kind="person_detector",
+                enabled=True,
+                visible_in_advanced_mode=True,
+                is_default_person_model=True,
+            )
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        upload_job_file(
+            receipt.job_code,
+            receipt.access_token,
+            file=UploadFile(file=archive, filename="images.zip"),
+            service=service,
+            scheduler=scheduler,
+        )
+
+    assert exc_info.value.status_code == 413
+    assert scheduler.submitted == []
 
 
 def test_get_public_job_returns_progress_events_and_download_state(tmp_path: Path) -> None:

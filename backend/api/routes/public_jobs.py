@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from backend.schemas.jobs import CreateJobRequest, JobReceipt, PublicJobStatus, PublishedModel
-from backend.services.job_service import JobService, get_job_service
+from backend.services.job_service import JobService, UploadTooLargeError, get_job_service
 from backend.services.model_service import ModelService, get_model_service
 from backend.services.scheduler_service import get_job_scheduler
 from backend.workers.scheduler import Scheduler
@@ -58,6 +58,11 @@ def upload_job_file(
             filename=file.filename or "upload",
             file_obj=file.file,
         )
+    except UploadTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail=str(exc),
+        ) from exc
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except ValueError as exc:

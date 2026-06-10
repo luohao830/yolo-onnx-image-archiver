@@ -59,6 +59,11 @@ STATUS_PROGRESS = {
     "failed": 100,
     "canceled": 0,
 }
+MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024 * 1024
+
+
+class UploadTooLargeError(ValueError):
+    pass
 
 
 def normalize_job_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -235,8 +240,7 @@ class JobService:
         upload_dir.mkdir(parents=True, exist_ok=True)
         raw_path = upload_dir / safe_filename
 
-        with raw_path.open("wb") as dst:
-            shutil.copyfileobj(file_obj, dst)
+        self._copy_upload_with_size_limit(file_obj, raw_path)
 
         if input_dir.exists():
             shutil.rmtree(input_dir)
@@ -249,6 +253,23 @@ class JobService:
 
         self._copy_single_image_to_input(raw_path, input_dir)
         return input_dir
+
+    @staticmethod
+    def _copy_upload_with_size_limit(file_obj: BinaryIO, raw_path: Path) -> None:
+        written = 0
+        try:
+            with raw_path.open("wb") as dst:
+                while True:
+                    chunk = file_obj.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > MAX_UPLOAD_FILE_BYTES:
+                        raise UploadTooLargeError("上传文件大小不能超过 100G")
+                    dst.write(chunk)
+        except Exception:
+            raw_path.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def _copy_single_image_to_input(source: Path, input_dir: Path) -> None:
