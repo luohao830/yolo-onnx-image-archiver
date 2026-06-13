@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-13T12:30:00+08:00",
+  "title": "Design System: YOLO 公网多用户推理平台",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "oklch(55% 0.22 255)",
+        "tonalRamp": [
+          "oklch(95% 0.03 255)",
+          "oklch(90% 0.06 255)",
+          "oklch(85% 0.10 255)",
+          "oklch(75% 0.16 255)",
+          "oklch(65% 0.20 255)",
+          "oklch(55% 0.22 255)",
+          "oklch(45% 0.20 255)",
+          "oklch(35% 0.16 255)"
+        ]
+      },
+      "primary-deep": {
+        "role": "primary",
+        "displayName": "Deep Signal",
+        "canonical": "oklch(49% 0.21 255)",
+        "tonalRamp": []
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "Soft Signal",
+        "canonical": "oklch(93% 0.03 255)",
+        "tonalRamp": []
+      },
+      "success": {
+        "role": "semantic",
+        "displayName": "Success Green",
+        "canonical": "oklch(58% 0.21 145)",
+        "tonalRamp": [
+          "oklch(95% 0.05 145)",
+          "oklch(90% 0.10 145)",
+          "oklch(80% 0.17 145)",
+          "oklch(70% 0.22 145)",
+          "oklch(58% 0.21 145)",
+          "oklch(48% 0.18 145)",
+          "oklch(38% 0.14 145)",
+          "oklch(25% 0.10 145)"
+        ]
+      },
+      "danger": {
+        "role": "semantic",
+        "displayName": "Danger Red",
+        "canonical": "oklch(43% 0.18 25)",
+        "tonalRamp": [
+          "oklch(95% 0.03 25)",
+          "oklch(90% 0.06 25)",
+          "oklch(85% 0.10 25)",
+          "oklch(65% 0.18 25)",
+          "oklch(50% 0.20 25)",
+          "oklch(43% 0.18 25)",
+          "oklch(35% 0.15 25)",
+          "oklch(25% 0.11 25)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "oklch(21% 0.03 250)",
+        "tonalRamp": [
+          "oklch(97% 0.01 250)",
+          "oklch(92% 0.02 250)",
+          "oklch(85% 0.03 250)",
+          "oklch(70% 0.04 250)",
+          "oklch(56% 0.04 250)",
+          "oklch(46% 0.04 250)",
+          "oklch(30% 0.03 250)",
+          "oklch(21% 0.03 250)"
+        ]
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Cool Workbench",
+        "canonical": "oklch(97% 0.01 240)",
+        "tonalRamp": []
+      },
+      "log-bg": {
+        "role": "surface",
+        "displayName": "Terminal Black",
+        "canonical": "oklch(12% 0.05 250)",
+        "tonalRamp": []
+      },
+      "log-accent": {
+        "role": "accent",
+        "displayName": "Terminal Cyan",
+        "canonical": "oklch(75% 0.15 220)",
+        "tonalRamp": []
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "页面主标题，最多两行。"
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "管理员页面标题。"
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "卡片和面板标题。"
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "正文与描述，行宽 65–75ch。"
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "eyebrow、徽章、表头，全大写。"
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "日志事件类型与时间戳。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "card",
+        "value": "0 14px 34px rgba(15, 23, 42, 0.06)",
+        "purpose": "卡片、面板、状态区域的标准阴影。"
+      },
+      {
+        "name": "focus-ring",
+        "value": "outline: 3px solid rgba(37, 99, 235, 0.28); outline-offset: 2px",
+        "purpose": "键盘焦点环，所有交互元素。"
+      },
+      {
+        "name": "current-step-glow",
+        "value": "0 0 0 5px rgba(37, 99, 235, 0.16)",
+        "purpose": "处理阶段当前步骤指示点外发光。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-standard",
+        "value": "ease",
+        "purpose": "按钮、边框、颜色状态过渡。"
+      },
+      {
+        "name": "progress-ease",
+        "value": "220ms ease",
+        "purpose": "进度条宽度变化。"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "prefers-reduced-motion: reduce 下替代。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "md",
+        "value": "760px"
+      },
+      {
+        "name": "lg",
+        "value": "980px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "主行动按钮，用于开始处理、提交等核心动作。",
+      "html": "<button class=\"ds-btn-primary\">开始处理</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 0; border-radius: 7px; padding: 0 14px; background: #2563eb; color: #fff; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; font-weight: 800; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease; } .ds-btn-primary:hover { background: #1d4ed8; } .ds-btn-primary:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.28); outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "次要入口或非主行动作。",
+      "html": "<button class=\"ds-btn-secondary\">进入</button>",
+      "css": ".ds-btn-secondary { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 1px solid #cbd5e1; border-radius: 7px; padding: 0 14px; background: #fff; color: #0f172a; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; font-weight: 800; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease; } .ds-btn-secondary:hover { border-color: #94a3b8; background: #f8fafc; } .ds-btn-secondary:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.28); outline-offset: 2px; }"
+    },
+    {
+      "name": "Success Button",
+      "kind": "button",
+      "refersTo": "button-success",
+      "description": "任务完成后的结果下载按钮。",
+      "html": "<button class=\"ds-btn-success\">下载结果压缩包</button>",
+      "css": ".ds-btn-success { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border: 0; border-radius: 7px; padding: 0 14px; background: #16a34a; color: #fff; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; font-weight: 800; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease; } .ds-btn-success:hover { background: #15803d; } .ds-btn-success:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.28); outline-offset: 2px; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "通用卡片/面板容器，用于模式入口、工作区、状态面板。",
+      "html": "<article class=\"ds-card\"><h2>人员筛选模式</h2><p>上传图片或压缩包，快速筛出检测到人的结果。</p></article>",
+      "css": ".ds-card { display: grid; gap: 12px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06); padding: 20px; color: #0f172a; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-card h2 { margin: 0; font-size: 20px; font-weight: 700; line-height: 1.2; } .ds-card p { margin: 0; color: #475569; font-size: 16px; line-height: 1.6; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "通用文本输入框。",
+      "html": "<input class=\"ds-input\" type=\"text\" placeholder=\"输入内容\" />",
+      "css": ".ds-input { width: 100%; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; color: #0f172a; padding: 10px 12px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 16px; line-height: 1.5; } .ds-input:focus-visible { outline: 3px solid rgba(37, 99, 235, 0.28); outline-offset: 2px; }"
+    },
+    {
+      "name": "File Upload Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "文件上传区域，虚线边框暗示拖放/选择。",
+      "html": "<div class=\"ds-upload\"><label>上传图片或压缩包</label><input type=\"file\" /></div>",
+      "css": ".ds-upload { display: grid; gap: 10px; border: 1px dashed #94a3b8; border-radius: 10px; background: #f8fafc; padding: 16px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-upload label { color: #0f172a; font-weight: 800; font-size: 16px; } .ds-upload input[type='file'] { width: 100%; color: #0f172a; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "status-badge-running",
+      "description": "任务状态徽章，running 示例。",
+      "html": "<span class=\"ds-badge-running\">running</span>",
+      "css": ".ds-badge-running { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 9px; background: #dbeafe; color: #1d4ed8; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 12px; font-weight: 800; text-transform: uppercase; }"
+    },
+    {
+      "name": "Admin Navigation",
+      "kind": "nav",
+      "refersTo": "nav",
+      "description": "管理员后台顶部导航。",
+      "html": "<nav class=\"ds-admin-nav\" aria-label=\"后台导航\"><a href=\"#\">模型管理</a><a href=\"#\">系统配置</a><a href=\"#\">任务监控</a><button class=\"ds-admin-logout\" type=\"button\">登出</button></nav>",
+      "css": ".ds-admin-nav { display: flex; gap: 10px; border-bottom: 1px solid #e2e8f0; background: #0f172a; padding: 14px 24px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-admin-nav a, .ds-admin-logout { border-radius: 7px; color: #cbd5e1; font-weight: 800; padding: 9px 12px; text-decoration: none; background: transparent; border: 0; cursor: pointer; } .ds-admin-nav a:hover, .ds-admin-logout:hover { background: rgba(59, 130, 246, 0.22); color: #fff; } .ds-admin-logout { margin-left: auto; }"
+    },
+    {
+      "name": "Log Panel",
+      "kind": "custom",
+      "refersTo": "log-panel",
+      "description": "深色日志面板，用于显示任务关键事件。",
+      "html": "<div class=\"ds-log-panel\"><ol class=\"ds-log-list\"><li><span>uploaded</span><p>文件已接收，开始解压。</p></li></ol></div>",
+      "css": ".ds-log-panel { display: grid; gap: 16px; border-radius: 10px; background: #020617; padding: 14px; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; } .ds-log-list { display: grid; gap: 8px; max-height: 260px; overflow: auto; margin: 0; padding: 0; list-style: none; } .ds-log-list li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.18); padding: 8px 0; } .ds-log-list li:last-child { border-bottom: 0; } .ds-log-list span { color: #38bdf8; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; } .ds-log-list p { margin: 0; color: #e2e8f0; font-size: 16px; line-height: 1.5; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Reliable Bench",
+    "overview": "这个界面是一架状态良好的实验台：上传、处理、日志、下载各就各位。没有噪音，每个按钮和进度条都在告诉你系统正在可靠运转。界面的气质从 PRODUCT.md 的'冷静、工程化、可信'延伸而来。中性浅色工作区承载主要任务，深色只出现在日志面板这种需要高密度信息的地方——日志本身成为'后台正在认真工作'的可信信号。装饰被压到最低，状态反馈被提到最高。",
+    "keyCharacteristics": [
+      "任务路径优先：每个页面只回答'现在该做什么'和'任务进行到哪了'。",
+      "状态即反馈：进度、日志、错误、成功都必须可见、可理解。",
+      "匿名≠低信任：无需登录的体验更要在文案、错误处理和视觉稳定感上建立信任。",
+      "深色是工具：深色面板仅用于日志/终端感内容，浅色工作区保持开放高效。",
+      "克制胜于丰富：少一个装饰元素，多一份可信度。"
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "body": "主色 #2563eb 只出现在主按钮、当前进度、运行状态和焦点环上。任何一页上，Signal Blue 的占比不应超过 10%。它的稀有性就是它的强调力。",
+        "section": "colors"
+      },
+      {
+        "name": "The Dark-Is-For-Logs Rule",
+        "body": "深色背景只用于日志面板。不要为了让界面'看起来更专业'而任意使用深色卡片或侧边栏。",
+        "section": "colors"
+      },
+      {
+        "name": "The No Shouting Rule",
+        "body": "字号上限为 36px (Display) 和 30px (Headline)。再大的标题会制造营销感，而不是工具感。",
+        "section": "typography"
+      },
+      {
+        "name": "The One Family Rule",
+        "body": "全界面只使用 Inter 及其系统回退。不要为了'层次'引入第二套无衬线或装饰字体。",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "表面在静止时是平的。阴影只出现在需要与背景分层的卡片/面板上。不要使用悬停时大幅抬升的阴影来制造'可点击'的暗示；可点击性由颜色、形状和光标承担。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do 使用 #f8fafc 作为页面背景，#ffffff 作为卡片/面板背景，保持冷灰工作区。",
+      "Do 把 #2563eb 留给主按钮、运行状态、当前进度和焦点环，让主色保持稀缺。",
+      "Do 在日志面板使用 #020617 深色背景 + #e2e8f0 浅色文字 + #38bdf8 事件类型。",
+      "Do 给所有交互元素提供清晰的焦点环（outline: 3px solid rgba(37, 99, 235, 0.28)）。",
+      "Do 在状态指示中同时使用颜色 + 文字/百分比，不单独依赖颜色。",
+      "Do 使用 Inter 单一家族，避免引入第二套无衬线或装饰字体。",
+      "Do 保持卡片阴影低调：0 14px 34px rgba(15, 23, 42, 0.06)。",
+      "Do 在 prefers-reduced-motion: reduce 下把过渡降到 0.01ms，支持即时状态变化。",
+      "Do 保证正文 #475569 在 #f8fafc 上对比度 ≥4.5:1，大号文字/按钮 ≥3:1。"
+    ],
+    "donts": [
+      "Don't 使用暖米色/奶油色/沙色作为页面背景。'可信'不等于'暖'。",
+      "Don't 把深色背景用作装饰卡片、侧边栏或大面积氛围，深色只给日志面板。",
+      "Don't 使用渐变文字、大数字指标、营销话术或抽象插图——这是 SaaS 营销落地页的 cliché，会拖慢匿名用户的任务路径。",
+      "Don't 使用大红大绿的状态色块和密集表格——这是传统运维后台的外观，只有内行才能看懂。",
+      "Don't 让界面冷淡到没有反馈、错误不解释。匿名用户需要每一步都被确认。",
+      "Don't 使用 999 / 9999 等任意 z-index。建立语义化层级（dropdown → sticky → modal-backdrop → modal → toast → tooltip）。",
+      "Don't 在卡片上堆砌卡片。嵌套卡片是错误的信息架构。",
+      "Don't 在虚线边框上传区域里使用奶油色背景暗示'拖放区'。上传区使用 #f8fafc。",
+      "Don't 在首页和任务页之间加入营销式 eyebrow 小字（'FEATURES'、'HOW IT WORKS'）。 eyebrow 只用于当前上下文标签（如'人员筛选模式'、'处理状态'）。",
+      "Don't 为每个 section 添加 01 / 02 / 03 编号标记。编号只用于真正的序列（如处理阶段）。"
+    ]
+  }
+}
