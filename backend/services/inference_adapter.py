@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
-from webui.processing import package_output_dir, run_inference
+from webui.processing import InferenceProgress, package_output_dir, run_inference
 
 
 def run_job_inference(
@@ -12,6 +12,7 @@ def run_job_inference(
     images_dir: Path,
     out_dir: Path,
     payload: Mapping[str, Any],
+    progress_callback: Callable[[InferenceProgress], None] | None = None,
 ) -> dict[str, Any]:
     summary = run_inference(
         model_path=model_path,
@@ -31,6 +32,7 @@ def run_job_inference(
         draw_boxes=bool(payload["draw_boxes"]),
         save_txt=bool(payload["save_txt"]),
         execution_device=str(payload["execution_device"]),
+        progress_callback=progress_callback,
     )
     return summary.__dict__
 

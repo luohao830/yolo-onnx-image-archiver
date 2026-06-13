@@ -1,10 +1,65 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from backend.services import inference_adapter
 from backend.services.job_service import build_job_event, normalize_job_payload
+
+
+class ProgressEventWriter:
+    def __init__(self, job_id: int, record_event, throttle_seconds: float = 2.0) -> None:
+        self.job_id = job_id
+        self.record_event = record_event
+        self.throttle_seconds = throttle_seconds
+        self.last_emit_at = 0.0
+        self.last_processed = -1
+
+    def __call__(self, progress) -> None:
+        processed = int(getattr(progress, "processed", 0) or 0)
+        total = int(getattr(progress, "total", 0) or 0)
+        stage = str(getattr(progress, "stage", "running") or "running")
+
+        if not self._should_emit(stage=stage, processed=processed):
+            return
+
+        percent = 0
+        if total > 0:
+            percent = max(0, min(100, round((processed / total) * 100)))
+
+        self.last_emit_at = monotonic()
+        self.last_processed = processed
+        self.record_event(
+            self.job_id,
+            build_job_event(
+                event_type="running",
+                message=self._build_message(stage=stage, processed=processed, total=total, percent=percent),
+                payload_json={
+                    "stage": stage,
+                    "processed": processed,
+                    "total": total,
+                    "written": processed,
+                    "progress": percent,
+                },
+            ),
+        )
+
+    def _should_emit(self, *, stage: str, processed: int) -> bool:
+        if stage == "done":
+            return True
+        if processed != self.last_processed and monotonic() - self.last_emit_at >= self.throttle_seconds:
+            return True
+        return self.last_processed < 0
+
+    def _build_message(self, *, stage: str, processed: int, total: int, percent: int) -> str:
+        if stage == "counting":
+            return f"正在统计图片，总计 {total} 张" if total else f"正在统计图片，已扫描 {processed} 张"
+        if stage == "done":
+            return f"推理完成，已处理 {processed} / {total} 张图片"
+        if total > 0:
+            return f"正在推理，已处理 {processed} / {total} 张图片（{percent}%）"
+        return f"正在推理，已处理 {processed} 张图片"
 
 
 class TaskRunner:
@@ -41,12 +96,14 @@ class TaskRunner:
 
             if not getattr(job, "input_path", None):
                 raise ValueError("job input path is missing")
+            progress_writer = ProgressEventWriter(job_id=job_id, record_event=self._record_event)
             with self.gpu_gate.acquire():
                 summary = inference_adapter.run_job_inference(
                     model_path=Path(model.onnx_path),
                     images_dir=Path(job.input_path),
                     out_dir=out_dir,
                     payload=payload,
+                    progress_callback=progress_writer,
                 )
             zip_path = inference_adapter.package_job_output(Path(summary["out_dir"]))
         except Exception as exc:  # noqa: BLE001
