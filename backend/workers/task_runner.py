@@ -28,6 +28,15 @@ class ProgressEventWriter:
         if total > 0:
             percent = max(0, min(100, round((processed / total) * 100)))
 
+        payload_json = {
+            "stage": stage,
+            "processed": processed,
+            "total": total,
+            "progress": percent,
+        }
+        if stage != "counting":
+            payload_json["written"] = processed
+
         self.last_emit_at = monotonic()
         self.last_processed = processed
         self.record_event(
@@ -35,13 +44,7 @@ class ProgressEventWriter:
             build_job_event(
                 event_type="running",
                 message=self._build_message(stage=stage, processed=processed, total=total, percent=percent),
-                payload_json={
-                    "stage": stage,
-                    "processed": processed,
-                    "total": total,
-                    "written": processed,
-                    "progress": percent,
-                },
+                payload_json=payload_json,
             ),
         )
 
@@ -63,12 +66,13 @@ class ProgressEventWriter:
 
 
 class TaskRunner:
-    def __init__(self, job_repo, model_repo, config_repo, gpu_gate, runtime_paths) -> None:
+    def __init__(self, job_repo, model_repo, config_repo, gpu_gate, runtime_paths, commit_progress=None) -> None:
         self.job_repo = job_repo
         self.model_repo = model_repo
         self.config_repo = config_repo
         self.gpu_gate = gpu_gate
         self.runtime_paths = runtime_paths
+        self.commit_progress = commit_progress
 
     def run(self, job_id: int) -> None:
         self.runtime_paths.ensure()
@@ -140,3 +144,5 @@ class TaskRunner:
 
     def _record_event(self, job_id: int, event: dict[str, Any]) -> None:
         self.job_repo.record_event(job_id, **event)
+        if self.commit_progress is not None:
+            self.commit_progress()

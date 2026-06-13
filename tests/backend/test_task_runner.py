@@ -7,7 +7,7 @@ from backend.db.models import JobEventRecord, ModelRecord
 from backend.repositories.jobs import JobRepository
 from backend.repositories.models import ModelRepository
 from backend.services.runtime_paths import RuntimePaths
-from backend.workers.task_runner import TaskRunner
+from backend.workers.task_runner import ProgressEventWriter, TaskRunner
 
 
 def test_task_runner_marks_completed(monkeypatch, tmp_path: Path) -> None:
@@ -328,6 +328,52 @@ def test_task_runner_marks_failed_when_model_is_missing(monkeypatch, tmp_path: P
 
     run_job_inference.assert_not_called()
     package_job_output.assert_not_called()
+
+
+def test_progress_event_writer_does_not_mark_counting_as_written() -> None:
+    record_event = MagicMock()
+    writer = ProgressEventWriter(job_id=7, record_event=record_event, throttle_seconds=0)
+
+    writer(SimpleNamespace(stage="counting", processed=5, total=5))
+
+    record_event.assert_called_once()
+    payload = record_event.call_args.args[1]["payload_json"]
+    assert payload == {
+        "stage": "counting",
+        "processed": 5,
+        "total": 5,
+        "progress": 100,
+    }
+
+
+def test_task_runner_commits_after_recording_events(monkeypatch, tmp_path: Path) -> None:
+    summary = {"out_dir": str(tmp_path / "results"), "total": 1, "written": 1}
+    monkeypatch.setattr("backend.services.inference_adapter.run_job_inference", MagicMock(return_value=summary))
+    monkeypatch.setattr("backend.services.inference_adapter.package_job_output", MagicMock(return_value=str(tmp_path / "results.zip")))
+
+    job_repo = MagicMock()
+    job_repo.get.return_value = SimpleNamespace(
+        id=1,
+        job_code="JOB-004",
+        model_id=10,
+        input_path=str(tmp_path / "images"),
+        payload_json=None,
+    )
+    model_repo = MagicMock()
+    model_repo.get.return_value = SimpleNamespace(onnx_path=str(tmp_path / "model.onnx"))
+    commit_progress = MagicMock()
+
+    runner = TaskRunner(
+        job_repo=job_repo,
+        model_repo=model_repo,
+        config_repo=MagicMock(),
+        gpu_gate=_DummyGpuGate(),
+        runtime_paths=RuntimePaths(tmp_path / "runtime"),
+        commit_progress=commit_progress,
+    )
+    runner.run(job_id=1)
+
+    assert commit_progress.call_count == 2
 
 
 class _DummyGpuGate:

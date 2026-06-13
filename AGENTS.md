@@ -4,9 +4,8 @@
 
 - 根目录包含容器编排与后端镜像文件：`docker-compose.yml`、`Dockerfile`、`requirements.txt`。
 - `backend/` 是 FastAPI 后端，包含 API 路由、服务层、仓储层、数据库模型、运行时路径管理和 worker 基础能力。
-- `frontend/user-app/` 是匿名用户前台，使用 Vite + React + TypeScript。
-- `frontend/admin-app/` 是管理员后台，使用 Vite + React + TypeScript；Docker 构建时通过 `VITE_BASE_PATH=/admin/` 适配子路径部署。
-- `gateway/` 保存统一入口 Nginx 配置；Docker Compose 通过 `gateway` 将 `/`、`/admin/` 和 `/api/` 聚合到宿主机 `58000` 端口。
+- `frontend/user-app/` 是匿名用户前台与内置管理员后台，使用 Vite + React + TypeScript。
+- `gateway/` 保存统一入口 Nginx 配置；Docker Compose 通过 `gateway` 将 `/` 和 `/api/` 聚合到宿主机 `58000` 端口，`/admin/` 由 `user-app` 的前端路由承载。
 - `webui/` 是旧版 Gradio 工具链和推理内核，当前不再是默认容器入口，但 `backend/services/inference_adapter.py` 会复用 `webui.processing`。
 - `models/` 保存宿主机模型文件，Docker 后端挂载为 `/data/models`。
 - `runtime/` 是运行时工作区，保存 SQLite 数据库、上传文件、任务目录、结果目录和临时文件；不要提交运行产物。
@@ -15,10 +14,10 @@
 
 ## 当前架构状态
 
-- 主线平台由 `backend`、`user-app`、`admin-app` 和 `gateway` 4 个 Compose 服务组成。
+- 主线平台由 `backend`、`user-app` 和 `gateway` 3 个 Compose 服务组成。
 - 后端默认使用 SQLite，数据库文件位于 `runtime/app.db`；当前没有 MongoDB，也不使用 `fo_data/`。
 - 公开接口已支持创建任务凭证、人员筛选上传入队、查询任务状态/关键日志、下载已完成任务结果压缩包和列出高级模式可见模型。
-- 管理员接口已支持登录、IP 白名单免密、模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消和重试。
+- 管理员接口面向内网单机访问，已支持模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消和重试。
 - 公开前台的人员筛选模式已接入图片或 `.zip` 压缩包上传、归档解压、默认人员模型绑定和任务入队；高级模式的模型参数与文件上传提交尚未接入公开 API，修改文档或功能时必须明确这条边界。
 
 ## 构建、运行与开发
@@ -30,16 +29,16 @@
 - 统一入口：`http://127.0.0.1:58000/`。
 - 后端本地开发：`uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`。
 - 用户前台本地开发：在 `frontend/user-app/` 下运行 `npm install`、`npm run dev`。
-- 管理员后台本地开发：在 `frontend/admin-app/` 下运行 `npm install`、`npm run dev`。
-- 两个 Vite 应用都通过开发代理将 `/api` 转发到 `http://127.0.0.1:8000`。
+- 管理员后台本地开发：在 `frontend/user-app/` 下运行 `npm install`、`npm run dev`，访问 `/admin/`。
+- Vite 应用通过开发代理将 `/api` 转发到 `http://127.0.0.1:8000`。
 
 ## 配置与运行时约束
 
-- 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`、`YOLO_PLATFORM_ADMIN_IP_WHITELIST` 和 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS`。
-- 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
+- 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL` 和 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS`。
+- 当前内网单机版管理员接口不再要求登录 token，生产公网部署前必须重新接入鉴权或网络隔离。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
 - Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传并解压到当前任务目录，不做 hash 复用或服务端压缩包缓存；修改体积或上传语义时必须同步文档。
-- 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 gateway 覆盖写入的 `X-Real-IP`，不信任客户端传入的 `X-Forwarded-For`。
+- `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 目前保留给反代来源识别；当前内网单机版管理员接口不再读取登录 token 或 IP 白名单。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 
@@ -56,8 +55,8 @@
 
 - 后端测试：`python -m pytest tests/backend -v`。
 - 用户前台测试：在 `frontend/user-app/` 下运行 `npm test`。
-- 管理员后台测试：在 `frontend/admin-app/` 下运行 `npm test`。
-- 前端构建验证：分别在 `frontend/user-app/` 和 `frontend/admin-app/` 下运行 `npm run build`。
+- 管理员后台测试随 `frontend/user-app/` 一起运行。
+- 前端构建验证：在 `frontend/user-app/` 下运行 `npm run build`。
 - 修改 API 契约时，补充或更新 `tests/backend/test_*_api.py` 与前端 `src/api/client.ts` 附近的调用测试。
 - 修改任务调度、归档解压或推理执行时，优先覆盖 `test_archive_ingest.py`、`test_scheduler.py`、`test_task_runner.py`。
 - 未执行的测试必须在回复、提交说明或 PR 描述中明确标注“未执行”并说明原因，不得编造结果。
@@ -147,7 +146,6 @@ PR 描述必须包含以下内容：
 ## 测试
 - `python -m pytest tests/backend -v`：通过 / 失败，失败原因为 ...
 - `npm test`（frontend/user-app）：通过 / 失败，失败原因为 ...
-- `npm test`（frontend/admin-app）：通过 / 失败，失败原因为 ...
 
 ## 端口 / 路径变更
 - 无
