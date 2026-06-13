@@ -388,17 +388,63 @@ nav[aria-label="后台导航"] {
   padding: 14px 24px;
 }
 
-nav[aria-label="后台导航"] a {
+nav[aria-label="后台导航"] a,
+.nav-logout {
+  border: 0;
   border-radius: 7px;
+  background: transparent;
   color: #cbd5e1;
   font-weight: 800;
   padding: 9px 12px;
   white-space: nowrap;
 }
 
-nav[aria-label="后台导航"] a:hover {
+.nav-logout {
+  margin-left: auto;
+}
+
+nav[aria-label="后台导航"] a:hover,
+.nav-logout:hover {
   background: rgba(59, 130, 246, 0.22);
   color: #fff;
+}
+
+.admin-login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+}
+
+.admin-login-card {
+  width: min(480px, 100%);
+}
+
+.admin-login-card h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.admin-login-card p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.admin-login-card label {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.admin-login-card input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #0f172a;
+  padding: 10px 12px;
 }
 
 .admin-page {

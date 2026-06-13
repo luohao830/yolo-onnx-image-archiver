@@ -128,13 +128,17 @@ http://127.0.0.1:5173
 | --- | --- | --- |
 | `YOLO_PLATFORM_RUNTIME_ROOT` | `runtime` | 运行时目录；Docker 中通过 `./runtime:/app/runtime` 持久化 |
 | `YOLO_PLATFORM_DATABASE_URL` | `sqlite:///.../runtime/app.db` | 数据库连接；默认使用 SQLite |
-| `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` | `172.16.0.0/12`（Compose） | 保留给反代来源识别；当前内网单机版管理员接口不再要求登录 token |
+| `YOLO_PLATFORM_ADMIN_SECRET` | `dev-secret` | 管理员登录密钥，生产环境必须覆盖 |
+| `YOLO_PLATFORM_ADMIN_TOKEN_SECRET` | 同 `YOLO_PLATFORM_ADMIN_SECRET` | 管理员 token 签名密钥 |
+| `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS` | `3600` | 管理员 token 有效期 |
+| `YOLO_PLATFORM_ADMIN_IP_WHITELIST` | 空 | 管理员免密 IP 白名单，支持逗号分隔的 IP 或 CIDR |
+| `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` | `172.16.0.0/12`（Compose） | 允许后端信任 `X-Real-IP` 的直连代理 IP 或 CIDR |
 
 Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和新平台模型管理使用，并通过 Compose GPU reservation 向后端容器暴露 NVIDIA GPU。管理员模型列表会自动扫描该目录下的 `.onnx` 文件并导入缺失记录，记录中的模型路径使用 `/data/models/<model>.onnx` 形式。
 
 ## 管理员后台
 
-当前内网单机版不再提供独立管理员登录页，访问 `/admin/` 即可进入内置后台。
+管理员后台由 `frontend/user-app/` 内置承载，访问 `/admin/` 后输入管理员密钥登录；命中管理员 IP 白名单的内网来源可免密进入。
 
 模型发布流程：
 
@@ -167,6 +171,7 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 
 管理员接口：
 
+- `POST /api/admin/login`
 - `GET /api/admin/models`
 - `POST /api/admin/models`
 - `POST /api/admin/models/refresh`

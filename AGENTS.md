@@ -34,11 +34,11 @@
 
 ## 配置与运行时约束
 
-- 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL` 和 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS`。
-- 当前内网单机版管理员接口不再要求登录 token，生产公网部署前必须重新接入鉴权或网络隔离。
+- 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`、`YOLO_PLATFORM_ADMIN_IP_WHITELIST` 和 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS`。
+- 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
 - Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传并解压到当前任务目录，不做 hash 复用或服务端压缩包缓存；修改体积或上传语义时必须同步文档。
-- `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 目前保留给反代来源识别；当前内网单机版管理员接口不再读取登录 token 或 IP 白名单。
+- 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 gateway 覆盖写入的 `X-Real-IP`，不信任客户端传入的 `X-Forwarded-For`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 
