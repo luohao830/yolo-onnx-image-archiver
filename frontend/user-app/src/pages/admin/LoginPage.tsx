@@ -17,12 +17,6 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   useEffect(() => {
     let cancelled = false;
 
-    if (localStorage.getItem(ADMIN_AUTO_LOGIN_DISABLED_KEY) === "1") {
-      return () => {
-        cancelled = true;
-      };
-    }
-
     async function tryWhitelistLogin() {
       try {
         const result = await adminLogin("");

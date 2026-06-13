@@ -30,9 +30,9 @@ function AdminLayout({ onLogout }: AdminLayoutProps) {
         </button>
       </nav>
       <Routes>
-        <Route path="/models" element={<ModelsPage />} />
-        <Route path="/configs" element={<ConfigsPage />} />
-        <Route path="/jobs" element={<JobsPage />} />
+        <Route path="models" element={<ModelsPage />} />
+        <Route path="configs" element={<ConfigsPage />} />
+        <Route path="jobs" element={<JobsPage />} />
         <Route path="*" element={<Navigate to="/admin/configs" replace />} />
       </Routes>
     </main>
