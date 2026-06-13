@@ -1,5 +1,84 @@
 # 仓库指南（请注意：此仓库的后续回复一律使用中文）
 
+## 项目定位
+
+YOLO 多用户推理平台，让匿名用户无需账户即可提交图片/压缩包进行 YOLO 推理，并在任务全生命周期中获得状态、日志和结果下载。仓库包含 FastAPI 后端、内置管理员后台的 React 前台、Nginx 统一入口，以及旧版 Gradio 工具链 `webui/`（当前仅作为推理内核被后端适配层复用）。
+
+## 常用命令
+
+### Docker Compose 启动（生产/集成验证）
+
+```bash
+mkdir -p models runtime
+docker compose build
+docker compose up -d
+```
+
+访问：`http://127.0.0.1:58000/`  
+路由：`/` 用户前台，`/admin/` 管理员后台，`/api/...` 后端 API。
+
+常用运维：
+
+```bash
+docker compose ps
+docker compose logs -f backend
+docker compose logs -f gateway
+docker compose down
+```
+
+### 后端本地开发
+
+```bash
+python -m pip install -r requirements.txt
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+后端入口 `backend/main.py`，所有路由前缀 `/api`。
+
+### 前端本地开发
+
+```bash
+cd frontend/user-app
+npm install
+npm run dev
+```
+
+Vite 开发服务器默认 `http://127.0.0.1:5173`，并将 `/api` 代理到 `http://127.0.0.1:8000`。管理员后台由同一个 `frontend/user-app/` 应用承载，访问 `/admin/`。
+
+### 测试
+
+后端全部测试：
+
+```bash
+python -m pytest tests/backend -v
+```
+
+运行单个测试文件或单个用例：
+
+```bash
+python -m pytest tests/backend/test_archive_ingest.py -v
+python -m pytest tests/backend/test_scheduler.py::test_scheduler_runs_pending_jobs -v
+```
+
+前端测试：
+
+```bash
+cd frontend/user-app
+npm test
+```
+
+前端构建验证：
+
+```bash
+cd frontend/user-app && npm run build
+```
+
+### 健康检查
+
+```bash
+curl http://127.0.0.1:58000/api/healthz
+```
+
 ## 项目结构与路径
 
 - 根目录包含容器编排与后端镜像文件：`docker-compose.yml`、`Dockerfile`、`requirements.txt`。
@@ -20,17 +99,34 @@
 - 管理员接口面向内网单机访问，已支持模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消和重试。
 - 公开前台的人员筛选模式已接入图片或 `.zip` 压缩包上传、归档解压、默认人员模型绑定和任务入队；高级模式的模型参数与文件上传提交尚未接入公开 API，修改文档或功能时必须明确这条边界。
 
-## 构建、运行与开发
+## 后端分层
 
-- Docker 构建：`docker compose build`。
-- Docker 启动：`docker compose up -d`；停止：`docker compose down`。
-- 查看容器状态：`docker compose ps`。
-- 查看日志：`docker compose logs -f backend`、`docker compose logs -f gateway`。
-- 统一入口：`http://127.0.0.1:58000/`。
-- 后端本地开发：`uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`。
-- 用户前台本地开发：在 `frontend/user-app/` 下运行 `npm install`、`npm run dev`。
-- 管理员后台本地开发：在 `frontend/user-app/` 下运行 `npm install`、`npm run dev`，访问 `/admin/`。
-- Vite 应用通过开发代理将 `/api` 转发到 `http://127.0.0.1:8000`。
+- `backend/api/routes/`：路由实现；公开接口在 `public_jobs.py`，管理员接口在 `admin_*.py`。
+- `backend/api/deps.py`：依赖注入，管理员鉴权通过 `require_admin` 实现。
+- `backend/services/`：业务逻辑。`job_service.py` 负责任务创建、上传、序列化；`scheduler_service.py` 组装调度器；`inference_adapter.py` 对接 `webui.processing`；`archive_ingest.py` 处理 `.zip` 解压；`runtime_paths.py` 管理运行时目录。
+- `backend/repositories/`：SQLAlchemy 数据访问，目录下有 `jobs.py`、`models.py`、`system_configs.py`。
+- `backend/db/models.py`：全部数据库模型（`JobRecord`、`ModelRecord`、`SystemConfigRecord`、`JobEventRecord`）。
+- `backend/core/`：配置（`config.py`，环境变量前缀 `YOLO_PLATFORM_`）、数据库连接（`db.py`）、管理员鉴权（`admin_auth.py`）。
+- `backend/workers/`：`Scheduler` 负责任务队列与线程池；`GpuGate` 限制并发 GPU 推理槽位；`TaskRunner` 调用推理适配层并写入进度事件。
+
+## 调度与推理流程
+
+1. `POST /api/jobs` 创建任务，返回 `job_code` 和 `access_token`。
+2. `POST /api/jobs/{job_code}/upload` 接收图片或 `.zip`，校验、解压、绑定默认人员模型，然后 `scheduler.submit(job_id)`。
+3. `Scheduler` 使用固定线程池消费队列，每个线程通过 `DatabaseTaskRunner` 新建独立会话运行 `TaskRunner.run(job_id)`。
+4. `TaskRunner` 获取任务、模型与 `payload_json`，经 `GpuGate` 调用 `inference_adapter.run_job_inference`，后者委托 `webui.processing.run_inference`。
+5. 推理回调 `ProgressEventWriter` 将进度写入 `JobEventRecord`（节流到每 2 秒或处理数变化）。
+6. 完成后调用 `inference_adapter.package_job_output` 生成结果压缩包，更新任务为 `completed`。
+
+## 任务状态
+
+`created` → `uploaded` → `running` → `completed`/`failed`/`canceled`。`cancel_requested` 标记用于运行中任务的取消信号（当前由推理循环自行检查）。
+
+## 管理员鉴权
+
+- `POST /api/admin/login` 用管理员密钥换取 token，默认密钥为 `dev-secret`，仅本地使用。
+- `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 可配置免密 IP/CIDR。
+- 反代场景下后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 `X-Real-IP`，不信任 `X-Forwarded-For`。
 
 ## 配置与运行时约束
 
@@ -42,14 +138,40 @@
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 
+## 模型管理
+
+- 模型记录指向 `.onnx` 文件；Docker 中宿主机 `models/` 挂载为 `/data/models`。
+- `GET /api/admin/models` 会自动扫描目录并导入缺失的 `.onnx` 记录。
+- 上传/导入的模型默认未发布、未对高级模式可见、未设为默认人员模型，需要管理员在模型管理页发布。
+- 只有 `model_kind == person_detector` 的模型可被设为默认人员模型。
+
+## 公开 API 边界
+
+当前公开 API 已实现：任务创建、人员筛选上传入队、状态查询、结果下载、列出已发布的高级模式模型。高级模式的任务参数与文件上传提交尚未接入公开 API，修改相关功能或文档时必须明确这条边界。
+
+## 上传与体积限制
+
+- Gateway 设置 `client_max_body_size 100g`；后端按原始文件大小限制 `100G`。
+- 不再按解压后的图片数量或总大小限制。
+- `.zip` 每次都会重新上传到当前任务目录并解压，不做 hash 复用或服务端压缩包缓存。
+
 ## 编码风格与命名
 
 - Python 遵循 PEP 8：4 空格缩进，函数与文件使用 `snake_case`，类使用 `CapWords`。
 - FastAPI 路由保持在 `backend/api/routes/`，依赖注入放在 `backend/api/deps.py`，业务逻辑优先放入 `backend/services/`，数据库访问放入 `backend/repositories/`。
 - 数据库模型集中在 `backend/db/models.py`；新增持久化字段时同步补充仓储、服务和测试。
-- React 组件与页面使用 TypeScript，页面放在 `src/pages/`，通用组件放在 `src/components/`，API 封装放在 `src/api/client.ts`。
+- React 组件与页面使用 TypeScript，页面放在 `src/pages/`，通用组件放在 `src/components/`，API 封装放在 `src/api/client.ts` 与 `src/admin-api/client.ts`。
 - 公共辅助函数添加简短 docstring 或清晰类型签名；日志优先于 `print`。
 - 避免把新平台逻辑继续塞入旧版 `webui/app.py`；除非是在维护旧 Gradio 调试入口或推理内核。
+
+## 设计系统要点（来自 DESIGN.md）
+
+- 品牌气质：冷静、工程化、可信。
+- 页面背景 `#f8fafc`，卡片背景 `#ffffff`；主色 `#2563eb` 仅用于主按钮、运行状态、当前进度和焦点环，保持稀缺。
+- 深色背景 `#020617` 只用于日志面板。
+- 字体使用 Inter 单一家族，等宽字体仅用于日志时间戳和事件类型。
+- 状态指示必须同时使用颜色 + 文字/百分比，不单独依赖颜色。
+- 遵循 `prefers-reduced-motion: reduce`。
 
 ## 测试指南
 
@@ -237,3 +359,9 @@ PR 创建后，需要轮询等待 PR 审查评论。
 * 没有端口、路径、环境变量或路由变更时，明确写“无”。
 * 没有关联 Issue 时，明确写“无”。
 * PR 描述、提交信息、审查回复必须与实际代码改动一致。
+
+## 相关文档
+
+- `README.md`：更详细的使用说明、API 摘要、兼容与边界。
+- `DESIGN.md`：完整设计系统、颜色、排版、组件规范。
+- `PRODUCT.md`：产品定位、用户、设计原则、无障碍目标。
