@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+export interface AdminLoginResponse {
+  token: string;
+}
+
 export interface AdminModel {
   id: number;
   name: string;
@@ -49,6 +53,7 @@ export interface AdminJobDetail extends AdminJob {
 }
 
 const DEFAULT_API_BASE_URL = "/api";
+const ADMIN_TOKEN_KEY = "admin-token";
 
 function resolveApiBaseUrl(): string {
   const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -60,8 +65,36 @@ function resolveApiBaseUrl(): string {
   return configuredBaseUrl.replace(/\/+$/, "");
 }
 
+export async function adminLogin(secret: string): Promise<AdminLoginResponse> {
+  const response = await fetch(`${resolveApiBaseUrl()}/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ secret })
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `admin login failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<AdminLoginResponse>;
+}
+
+function getAdminToken(): string {
+  return localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
+}
+
 function adminFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${resolveApiBaseUrl()}${path}`, init);
+  const headers = new Headers(init?.headers);
+  const token = getAdminToken();
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  return fetch(`${resolveApiBaseUrl()}${path}`, {
+    ...init,
+    headers
+  });
 }
 
 export async function listAdminModels(): Promise<AdminModel[]> {
