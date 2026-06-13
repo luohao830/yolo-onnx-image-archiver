@@ -33,15 +33,6 @@ services:
     expose:
       - "80"
 
-  admin-app:
-    build:
-      context: ./frontend/admin-app
-      dockerfile: Dockerfile
-    container_name: yolo_platform_admin_app
-    restart: unless-stopped
-    expose:
-      - "80"
-
   gateway:
     image: nginx:1.27-alpine
     container_name: yolo_platform_gateway
@@ -49,7 +40,6 @@ services:
     depends_on:
       - backend
       - user-app
-      - admin-app
     ports:
       - "58000:80"
     volumes:

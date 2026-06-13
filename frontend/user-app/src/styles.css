@@ -362,6 +362,240 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.page-hero--with-action,
+.page-heading--with-action {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-entry {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.admin-shell {
+  min-height: 100vh;
+}
+
+nav[aria-label="后台导航"] {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid #e2e8f0;
+  background: #0f172a;
+  padding: 14px 24px;
+}
+
+nav[aria-label="后台导航"] a {
+  border-radius: 7px;
+  color: #cbd5e1;
+  font-weight: 800;
+  padding: 9px 12px;
+  white-space: nowrap;
+}
+
+nav[aria-label="后台导航"] a:hover {
+  background: rgba(59, 130, 246, 0.22);
+  color: #fff;
+}
+
+.admin-page {
+  display: grid;
+  gap: 18px;
+  width: min(1280px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0;
+}
+
+.page-heading {
+  display: grid;
+  gap: 6px;
+}
+
+.page-heading h1,
+.detail-panel h2,
+.detail-panel h3 {
+  margin: 0;
+  color: #0f172a;
+  letter-spacing: 0;
+}
+
+.page-heading h1 {
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.page-heading p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.admin-form-card,
+.admin-toolbar {
+  align-items: start;
+}
+
+.admin-toolbar {
+  grid-template-columns: max-content minmax(240px, 1fr) max-content;
+  align-items: center;
+}
+
+.admin-toolbar label {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.admin-toolbar input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #fff;
+  color: #0f172a;
+  padding: 10px 12px;
+}
+
+.notice {
+  margin: 0;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  background: #f0fdf4;
+  color: #166534;
+  padding: 10px 12px;
+}
+
+.jobs-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+}
+
+.table-card,
+.detail-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+}
+
+.table-card {
+  overflow: hidden;
+}
+
+.job-row,
+.model-row {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 12px 14px;
+}
+
+.job-row {
+  grid-template-columns: 1.1fr 0.75fr 0.75fr 0.5fr minmax(240px, 1fr);
+}
+
+.model-row {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+.job-row:last-child,
+.model-row:last-child {
+  border-bottom: 0;
+}
+
+.job-row--head {
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.model-row div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.model-row span {
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+.model-list .empty-state {
+  padding: 20px;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-panel {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.detail-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.detail-list div {
+  display: grid;
+  gap: 6px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+}
+
+.detail-list div:last-child {
+  border-bottom: 0;
+}
+
+.detail-list dt {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-list dd {
+  margin: 0;
+  color: #0f172a;
+  overflow-wrap: anywhere;
+}
+
+.log-panel--embedded {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+@media (max-width: 980px) {
+  .admin-page {
+    width: min(100% - 24px, 1280px);
+  }
+
+  .jobs-layout,
+  .job-row,
+  .model-row,
+  .admin-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .job-row--head {
+    display: none;
+  }
+
+  nav[aria-label="后台导航"] {
+    padding: 12px;
+  }
+}
+
 @media (max-width: 760px) {
   .app-main {
     width: min(100% - 24px, 1120px);
@@ -370,6 +604,15 @@ button:disabled {
 
   .page-hero h1 {
     font-size: 28px;
+  }
+
+  .page-hero--with-action,
+  .page-heading--with-action {
+    flex-direction: column;
+  }
+
+  .admin-entry {
+    margin-top: 0;
   }
 
   .mode-grid,
