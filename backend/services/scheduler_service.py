@@ -36,6 +36,7 @@ class DatabaseTaskRunner:
                 config_repo=None,
                 gpu_gate=self.gpu_gate,
                 runtime_paths=self.runtime_paths,
+                commit_progress=session.commit,
             )
             runner.run(job_id)
 
