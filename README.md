@@ -1,11 +1,11 @@
-# YOLO 公网多用户推理平台
+# YOLO 多用户推理平台
 
-本仓库正在从单机 Gradio 推理工具演进为面向公网匿名用户的多用户 YOLO 推理平台。当前主线由 FastAPI 后端、内置管理员后台的 React 前端和 Nginx 统一入口组成；旧版 `webui/` 仍保留为推理内核与调试入口。
+本仓库正在从单机 Gradio 推理工具演进为多用户 YOLO 推理平台。当前主线由 FastAPI 后端、内置管理员后台的 React 前端和 Nginx 统一入口组成；旧版 `webui/` 仍保留为推理内核与调试入口。
 
 ## 当前能力
 
 - `backend/`：FastAPI API 服务，提供公开任务创建、人员筛选上传入队、状态/日志查询、结果下载、模型管理、并发配置、任务监控、详情、取消、重试与下载接口。
-- `frontend/user-app/`：匿名用户前台，内置 `/admin/` 管理后台，包含上传工作台、任务进度/关键日志/结果下载视图、模型管理、系统配置和任务监控页面。
+- `frontend/user-app/`：用户前台，内置 `/admin/` 管理后台，包含上传工作台、任务进度/关键日志/结果下载视图、模型管理、系统配置和任务监控页面。
 - `gateway/`：Nginx 统一入口，将用户前台、管理员后台和 `/api/` 转发到同一端口。
 - `webui/`：旧版 Gradio 工具链与 `webui.processing.run_inference` 推理实现，后端 `TaskRunner` 通过适配层复用它。
 
@@ -17,7 +17,7 @@
 .
 ├── backend/                 # FastAPI、数据库模型、服务层、仓储层、worker 基础能力
 ├── frontend/
-│   └── user-app/            # 匿名用户前台与内置管理员后台，Vite + React
+│   └── user-app/            # 用户前台与内置管理员后台，Vite + React
 ├── gateway/                 # Docker Compose 统一入口 Nginx 配置
 ├── images/                  # 旧版 webui 默认图片目录，当前 Compose 不挂载
 ├── models/                  # 模型文件目录，Docker 中挂载为 /data/models
@@ -52,7 +52,7 @@ docker compose up -d
 当前 `docker-compose.yml` 会启动 3 个容器：
 
 - `backend`：FastAPI 后端，容器内监听 `8000`
-- `user-app`：匿名用户前台和内置管理员后台静态站点
+- `user-app`：用户前台和内置管理员后台静态站点
 - `gateway`：统一入口 Nginx，对宿主机暴露 `58000`
 
 访问地址：
@@ -128,7 +128,7 @@ http://127.0.0.1:5173
 | --- | --- | --- |
 | `YOLO_PLATFORM_RUNTIME_ROOT` | `runtime` | 运行时目录；Docker 中通过 `./runtime:/app/runtime` 持久化 |
 | `YOLO_PLATFORM_DATABASE_URL` | `sqlite:///.../runtime/app.db` | 数据库连接；默认使用 SQLite |
-| `YOLO_PLATFORM_ADMIN_SECRET` | `dev-secret` | 管理员登录密钥，生产环境必须覆盖 |
+| `YOLO_PLATFORM_ADMIN_SECRET` | `dev-secret` | 管理员登录密钥，线上环境必须覆盖 |
 | `YOLO_PLATFORM_ADMIN_TOKEN_SECRET` | 同 `YOLO_PLATFORM_ADMIN_SECRET` | 管理员 token 签名密钥 |
 | `YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS` | `3600` | 管理员 token 有效期 |
 | `YOLO_PLATFORM_ADMIN_IP_WHITELIST` | 空 | 管理员免密 IP 白名单，支持逗号分隔的 IP 或 CIDR |
@@ -138,7 +138,7 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 
 ## 管理员后台
 
-管理员后台由 `frontend/user-app/` 内置承载，访问 `/admin/` 后输入管理员密钥登录；命中管理员 IP 白名单的内网来源可免密进入。
+管理员后台由 `frontend/user-app/` 内置承载，访问 `/admin/` 后输入管理员密钥登录；命中管理员 IP 白名单的来源可免密进入。
 
 模型发布流程：
 

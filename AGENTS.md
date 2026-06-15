@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-YOLO 多用户推理平台，让匿名用户无需账户即可提交图片/压缩包进行 YOLO 推理，并在任务全生命周期中获得状态、日志和结果下载。仓库包含 FastAPI 后端、内置管理员后台的 React 前台、Nginx 统一入口，以及旧版 Gradio 工具链 `webui/`（当前仅作为推理内核被后端适配层复用）。
+YOLO 多用户推理平台，让用户无需账户即可提交图片/压缩包进行 YOLO 推理，并在任务全生命周期中获得状态、日志和结果下载。仓库包含 FastAPI 后端、内置管理员后台的 React 前台、Nginx 统一入口，以及旧版 Gradio 工具链 `webui/`（当前仅作为推理内核被后端适配层复用）。
 
 ## 常用命令
 
@@ -83,7 +83,7 @@ curl http://127.0.0.1:58000/api/healthz
 
 - 根目录包含容器编排与后端镜像文件：`docker-compose.yml`、`Dockerfile`、`requirements.txt`。
 - `backend/` 是 FastAPI 后端，包含 API 路由、服务层、仓储层、数据库模型、运行时路径管理和 worker 基础能力。
-- `frontend/user-app/` 是匿名用户前台与内置管理员后台，使用 Vite + React + TypeScript。
+- `frontend/user-app/` 是用户前台与内置管理员后台，使用 Vite + React + TypeScript。
 - `gateway/` 保存统一入口 Nginx 配置；Docker Compose 通过 `gateway` 将 `/` 和 `/api/` 聚合到宿主机 `58000` 端口，`/admin/` 由 `user-app` 的前端路由承载。
 - `webui/` 是旧版 Gradio 工具链和推理内核，当前不再是默认容器入口，但 `backend/services/inference_adapter.py` 会复用 `webui.processing`。
 - `models/` 保存宿主机模型文件，Docker 后端挂载为 `/data/models`。
@@ -131,7 +131,7 @@ curl http://127.0.0.1:58000/api/healthz
 ## 配置与运行时约束
 
 - 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`、`YOLO_PLATFORM_ADMIN_IP_WHITELIST` 和 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS`。
-- 管理员默认密钥为 `dev-secret`，仅可用于本地开发；生产或公网环境必须覆盖。
+- 管理员默认密钥为 `dev-secret`，仅可用于本地开发；线上环境必须覆盖。
 - Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
 - Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传并解压到当前任务目录，不做 hash 复用或服务端压缩包缓存；修改体积或上传语义时必须同步文档。
 - 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 gateway 覆盖写入的 `X-Real-IP`，不信任客户端传入的 `X-Forwarded-For`。
