@@ -91,6 +91,19 @@ textarea {
   border-radius: 999px;
 }
 
+/* 屏幕阅读器专用（视觉隐藏但可访问） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* prefers-reduced-motion 全局兜底 */
 @media (prefers-reduced-motion: reduce) {
   *,

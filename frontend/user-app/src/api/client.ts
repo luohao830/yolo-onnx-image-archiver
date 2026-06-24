@@ -29,6 +29,48 @@ export interface PublicJobStatus {
   events: JobEvent[];
   error_message?: string | null;
   download_ready: boolean;
+  summary?: JobStats | null;
+}
+
+/** 任务统计（后端 JobRecord.summary_json）。 */
+export interface JobStats {
+  total?: number;
+  written?: number;
+  by_label?: Record<string, number>;
+  elapsed_sec?: number;
+  inference_sec?: number;
+  preprocess_sec?: number;
+  postprocess_sec?: number;
+  hardlink_sec?: number;
+  draw_sec?: number;
+  drawn?: number;
+  txt_written?: number;
+  hardlinked?: number;
+  copied?: number;
+  failed?: number;
+  used_batch?: number;
+  used_imgsz?: number[] | [number, number];
+  cuda_enabled?: boolean;
+  providers?: string[];
+}
+
+export interface JobDetection {
+  filename: string;
+  rel_path?: string;
+  width: number;
+  height: number;
+  detections: Array<{
+    label: string;
+    confidence: number;
+    bbox: [number, number, number, number];
+    cls_id: number;
+  }>;
+  has_drawn: boolean;
+  drawn_path?: string | null;
+}
+
+export interface JobDetectionsResponse {
+  images: JobDetection[];
 }
 
 export interface UploadJobFileOptions {
@@ -47,6 +89,17 @@ function resolveApiBaseUrl(): string {
   return configuredBaseUrl.replace(/\/+$/, "");
 }
 
+export interface AdvancedJobPayload {
+  conf?: number;
+  iou?: number;
+  batch?: number;
+  imgsz?: number | null;
+  draw_boxes?: boolean;
+  save_txt?: boolean;
+  recursive?: boolean;
+  execution_device?: string;
+}
+
 export async function createJob(mode: JobMode): Promise<CreateJobResponse> {
   const response = await fetch(`${resolveApiBaseUrl()}/jobs`, {
     method: "POST",
@@ -58,6 +111,25 @@ export async function createJob(mode: JobMode): Promise<CreateJobResponse> {
 
   if (!response.ok) {
     throw new Error(`create job failed: ${response.status}`);
+  }
+
+  return response.json() as Promise<CreateJobResponse>;
+}
+
+export async function createAdvancedJob(
+  modelId: number,
+  payload: AdvancedJobPayload
+): Promise<CreateJobResponse> {
+  const response = await fetch(`${resolveApiBaseUrl()}/jobs`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ mode: "advanced", model_id: modelId, payload })
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `create advanced job failed: ${response.status}`));
   }
 
   return response.json() as Promise<CreateJobResponse>;
@@ -116,6 +188,74 @@ export function buildJobDownloadUrl(jobCode: string, accessToken: string): strin
   });
 
   return `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/download?${searchParams.toString()}`;
+}
+
+export function buildJobEventsUrl(jobCode: string, accessToken: string): string {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+
+  return `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/events?${searchParams.toString()}`;
+}
+
+export function buildJobImageUrl(jobCode: string, accessToken: string, relPath: string): string {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+
+  return `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/images/${encodePath(relPath)}?${searchParams.toString()}`;
+}
+
+/** 订阅任务 SSE 事件；返回取消订阅函数。失败时回调 onError 以便降级轮询。 */
+export function subscribeJobEvents(
+  jobCode: string,
+  accessToken: string,
+  onEvent: (event: JobEvent) => void,
+  onError?: (error: Event) => void
+): () => void {
+  const url = buildJobEventsUrl(jobCode, accessToken);
+  const source = new EventSource(url);
+
+  source.onmessage = (messageEvent) => {
+    try {
+      const parsed = JSON.parse(messageEvent.data) as JobEvent;
+      onEvent(parsed);
+    } catch {
+      // 忽略无法解析的 keepalive 注释与异常帧。
+    }
+  };
+
+  source.onerror = (event) => {
+    onError?.(event);
+  };
+
+  return () => source.close();
+}
+
+export async function getJobDetections(
+  jobCode: string,
+  accessToken: string
+): Promise<JobDetectionsResponse> {
+  const searchParams = new URLSearchParams({
+    access_token: accessToken
+  });
+  const response = await fetch(
+    `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/detections?${searchParams.toString()}`
+  );
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `get detections failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<JobDetectionsResponse>;
+}
+
+function encodePath(relPath: string): string {
+  // 保留路径分隔符，仅编码各段中的特殊字符。
+  return relPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 async function readErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
