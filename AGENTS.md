@@ -207,6 +207,7 @@ git remote -v
 * 提交信息必须使用 **`superpowers:chinese-commit-conventions`** skill 生成。
 * 提交信息必须基于**当前分支的实际改动**，不得根据猜测、计划或未提交内容编写。
 * 提交信息必须符合**中文 Conventional Commits** 规范。
+* 提交信息不要包含 `Co-Authored-By: Claude <noreply@anthropic.com>` 及任何机器/AI 协作者署名。
 * 提交信息必须使用真实的多行格式，确保：
 
   * 标题、正文、技术方案、影响范围分层清晰
