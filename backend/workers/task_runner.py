@@ -66,13 +66,23 @@ class ProgressEventWriter:
 
 
 class TaskRunner:
-    def __init__(self, job_repo, model_repo, config_repo, gpu_gate, runtime_paths, commit_progress=None) -> None:
+    def __init__(
+        self,
+        job_repo,
+        model_repo,
+        config_repo,
+        gpu_gate,
+        runtime_paths,
+        commit_progress=None,
+        event_bus=None,
+    ) -> None:
         self.job_repo = job_repo
         self.model_repo = model_repo
         self.config_repo = config_repo
         self.gpu_gate = gpu_gate
         self.runtime_paths = runtime_paths
         self.commit_progress = commit_progress
+        self.event_bus = event_bus
 
     def run(self, job_id: int) -> None:
         self.runtime_paths.ensure()
@@ -101,6 +111,11 @@ class TaskRunner:
             if not getattr(job, "input_path", None):
                 raise ValueError("job input path is missing")
             progress_writer = ProgressEventWriter(job_id=job_id, record_event=self._record_event)
+            detections: list[dict[str, Any]] = []
+
+            def _detection_callback(batch_detections: list[dict[str, Any]]) -> None:
+                detections.extend(batch_detections)
+
             with self.gpu_gate.acquire():
                 summary = inference_adapter.run_job_inference(
                     model_path=Path(model.onnx_path),
@@ -108,7 +123,10 @@ class TaskRunner:
                     out_dir=out_dir,
                     payload=payload,
                     progress_callback=progress_writer,
+                    detection_callback=_detection_callback,
                 )
+            if detections:
+                inference_adapter.write_detections_json(Path(summary["out_dir"]), detections)
             zip_path = inference_adapter.package_job_output(Path(summary["out_dir"]))
         except Exception as exc:  # noqa: BLE001
             error_message = str(exc) or exc.__class__.__name__
@@ -123,6 +141,8 @@ class TaskRunner:
             )
             return
 
+        summary_json = inference_adapter.build_job_summary_json(summary)
+        self.job_repo.update_summary(job_id, summary_json=summary_json)
         self.job_repo.mark_completed(
             job_id,
             result_dir=str(summary["out_dir"]),
@@ -138,11 +158,25 @@ class TaskRunner:
                     "result_zip_path": str(zip_path),
                     "total": summary.get("total"),
                     "written": summary.get("written"),
+                    "detections_ready": bool(detections),
                 },
             ),
         )
 
     def _record_event(self, job_id: int, event: dict[str, Any]) -> None:
-        self.job_repo.record_event(job_id, **event)
+        record = self.job_repo.record_event(job_id, **event)
         if self.commit_progress is not None:
             self.commit_progress()
+        if self.event_bus is not None:
+            payload = {
+                "id": getattr(record, "id", None),
+                "job_id": job_id,
+                "event_type": event["event_type"],
+                "message": event["message"],
+                "payload_json": event.get("payload_json") or {},
+            }
+            try:
+                self.event_bus.publish(f"job:{job_id}", payload)
+            except Exception:  # noqa: BLE001
+                # SSE 推送失败不应影响任务执行。
+                pass

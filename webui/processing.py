@@ -11,7 +11,7 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from webui.utils import get_logger, sanitize_filename, unique_path
 
@@ -692,6 +692,7 @@ def run_inference(
     save_txt: bool = False,
     execution_device: str = "auto",
     progress_callback: Optional[Callable[[InferenceProgress], None]] = None,
+    detection_callback: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
 ) -> InferenceSummary:
     import onnxruntime as ort
 
@@ -924,6 +925,66 @@ def run_inference(
         for label_name, count in summary.by_label.items():
             by_label[label_name] = by_label.get(label_name, 0) + int(count)
 
+    def _build_batch_detections(
+        *,
+        batch_paths: List[Path],
+        dets_for_draw: List[Optional[Tuple["object", "object", "object"]]],
+        preds: List[Tuple[Path, List[str]]],
+        orig_hws: List[Tuple[int, int]],
+        drawn_paths: Dict[int, str],
+        unmatched_label: str,
+        class_names: Optional[Sequence[str]],
+        out_dir: Path,
+    ) -> List[Dict[str, Any]]:
+        """组装每个 batch 内逐图检测结果，供 detection_callback 回调。"""
+        import numpy as np
+
+        results: List[Dict[str, Any]] = []
+        for bi, src in enumerate(batch_paths):
+            det = dets_for_draw[bi] if bi < len(dets_for_draw) else None
+            height, width = orig_hws[bi] if bi < len(orig_hws) else (0, 0)
+            rel_name = src.name
+            detections: List[Dict[str, Any]] = []
+            has_drawn = bi in drawn_paths
+            drawn_path = drawn_paths.get(bi)
+            if det is not None:
+                xyxy, cls_ids, scores = det
+                for idx in range(int(xyxy.shape[0])):
+                    box = xyxy[idx]
+                    cls_id_i = int(cls_ids[idx])
+                    detections.append(
+                        {
+                            "label": sanitize_label(
+                                _label_from_id(cls_id_i, class_names), fallback=str(cls_id_i)
+                            ),
+                            "confidence": float(scores[idx]),
+                            "bbox": [
+                                float(box[0]),
+                                float(box[1]),
+                                float(box[2]),
+                                float(box[3]),
+                            ],
+                            "cls_id": cls_id_i,
+                        }
+                    )
+            rel_parent: Path
+            try:
+                rel_parent = src.parent.relative_to(images_dir)
+            except Exception:  # noqa: BLE001
+                rel_parent = Path(".")
+            results.append(
+                {
+                    "filename": rel_name,
+                    "rel_path": str(src.relative_to(images_dir)) if src.is_absolute() else str(src),
+                    "width": int(width),
+                    "height": int(height),
+                    "detections": detections,
+                    "has_drawn": bool(has_drawn),
+                    "drawn_path": drawn_path,
+                }
+            )
+        return results
+
     def _process_batch_outputs(
         batch_paths: List[Path],
         out,
@@ -1083,6 +1144,7 @@ def run_inference(
         write_batch_sec = float(time.perf_counter() - t_write)
 
         draw_batch_sec = 0.0
+        drawn_paths: Dict[int, str] = {}
         if draw_boxes:
             import cv2
 
@@ -1127,11 +1189,24 @@ def run_inference(
                     ok = cv2.imwrite(str(dest), canvas)
                     if ok:
                         local_drawn += 1
+                        drawn_paths[bi] = str(dest)
                     else:
                         local_failed += 1
                         raise ValueError(f"画框图片写入失败: {dest}")
 
             draw_batch_sec = float(time.perf_counter() - t_draw)
+
+        if detection_callback is not None:
+            detection_callback(_build_batch_detections(
+                batch_paths=batch_paths[:real_count],
+                dets_for_draw=dets_for_draw,
+                preds=preds,
+                orig_hws=orig_hws,
+                drawn_paths=drawn_paths,
+                unmatched_label=unmatched_label,
+                class_names=class_names,
+                out_dir=out_dir,
+            ))
 
         return BatchWorkSummary(
             total=local_total,

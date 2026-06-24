@@ -66,6 +66,7 @@ def test_task_runner_marks_completed(monkeypatch, tmp_path: Path) -> None:
                     "result_zip_path": str(tmp_path / "results.zip"),
                     "total": 2,
                     "written": 2,
+                    "detections_ready": False,
                 },
             ),
         ]
@@ -226,7 +227,9 @@ def test_task_runner_persists_completion_with_real_repositories(monkeypatch, tmp
             "result_zip_path": str(tmp_path / "results.zip"),
             "total": 4,
             "written": 4,
+            "detections_ready": False,
         }
+        assert saved.summary_json == {"total": 4, "written": 4}
 
 
 def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_path: Path) -> None:
@@ -374,6 +377,72 @@ def test_task_runner_commits_after_recording_events(monkeypatch, tmp_path: Path)
     runner.run(job_id=1)
 
     assert commit_progress.call_count == 2
+
+
+def test_task_runner_persists_summary_json(monkeypatch, tmp_path: Path) -> None:
+    summary = {
+        "out_dir": str(tmp_path / "results"),
+        "total": 5,
+        "written": 5,
+        "by_label": {"person": 4, "no_person": 1},
+        "elapsed_sec": 1.23,
+        "inference_sec": 0.8,
+        "preprocess_sec": 0.2,
+        "postprocess_sec": 0.1,
+        "hardlink_sec": 0.05,
+        "draw_sec": 0.0,
+        "drawn": 0,
+        "txt_written": 0,
+        "hardlinked": 5,
+        "copied": 0,
+        "failed": 0,
+        "used_batch": 16,
+        "used_imgsz": (640, 640),
+        "cuda_enabled": False,
+        "providers": ["CPUExecutionProvider"],
+    }
+    monkeypatch.setattr("backend.services.inference_adapter.run_job_inference", MagicMock(return_value=summary))
+    monkeypatch.setattr("backend.services.inference_adapter.package_job_output", MagicMock(return_value=str(tmp_path / "results.zip")))
+
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    runtime_paths = RuntimePaths(tmp_path / "runtime")
+
+    with session_scope(engine) as session:
+        model = ModelRecord(onnx_path=str(tmp_path / "model.onnx"))
+        session.add(model)
+        session.flush()
+        job = JobRepository(session).create_job(
+            job_code="JOB-SUM",
+            access_token_hash="hash",
+            mode="person_filter",
+            model_id=model.id,
+            payload_json={"recursive": False, "batch": 4},
+        )
+        JobRepository(session).mark_uploaded(job.id, input_path=str(images_dir))
+        job_id = job.id
+
+    with session_scope(engine) as session:
+        runner = TaskRunner(
+            job_repo=JobRepository(session),
+            model_repo=ModelRepository(session),
+            config_repo=MagicMock(),
+            gpu_gate=_DummyGpuGate(),
+            runtime_paths=runtime_paths,
+        )
+        runner.run(job_id=job_id)
+
+    with session_scope(engine) as session:
+        saved = JobRepository(session).get(job_id)
+        assert saved.status == "completed"
+        assert saved.summary_json is not None
+        assert saved.summary_json["by_label"] == {"person": 4, "no_person": 1}
+        assert saved.summary_json["used_imgsz"] == [640, 640]
+        assert saved.summary_json["providers"] == ["CPUExecutionProvider"]
+        assert saved.summary_json["cuda_enabled"] is False
+        assert "out_dir" not in saved.summary_json
 
 
 class _DummyGpuGate:

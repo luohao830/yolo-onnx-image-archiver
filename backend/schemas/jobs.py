@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 class CreateJobRequest(BaseModel):
     mode: Literal["person_filter", "advanced"]
+    model_id: int | None = None
+    payload: dict[str, Any] | None = None
 
 
 class JobReceipt(BaseModel):
@@ -23,6 +25,7 @@ class PublicJobStatus(BaseModel):
     events: list["JobEvent"] = []
     error_message: str | None = None
     download_ready: bool = False
+    summary: dict[str, Any] | None = None
 
 
 class PublishedModel(BaseModel):
@@ -50,3 +53,4 @@ class AdminJobDetail(BaseModel):
     result_zip_available: bool = False
     download_ready: bool = False
     events: list[JobEvent] = []
+    summary: dict[str, Any] | None = None

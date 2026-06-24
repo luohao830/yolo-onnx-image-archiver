@@ -9,6 +9,7 @@ from backend.core.db import session_scope
 from backend.repositories.jobs import JobRepository
 from backend.repositories.models import ModelRepository
 from backend.services.config_service import ConfigService
+from backend.services.event_bus import get_event_bus
 from backend.services.job_service import get_job_service
 from backend.services.runtime_paths import RuntimePaths
 from backend.workers.gpu_gate import GpuGate
@@ -37,6 +38,7 @@ class DatabaseTaskRunner:
                 gpu_gate=self.gpu_gate,
                 runtime_paths=self.runtime_paths,
                 commit_progress=session.commit,
+                event_bus=get_event_bus(),
             )
             runner.run(job_id)
 

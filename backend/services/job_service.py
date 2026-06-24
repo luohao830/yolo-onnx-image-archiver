@@ -15,6 +15,7 @@ from backend.core.config import settings
 from backend.core.db import build_engine, create_all, session_scope
 from backend.repositories.jobs import JobRepository
 from backend.repositories.models import ModelRepository
+from backend.services import inference_adapter
 from backend.services.archive_ingest import SUPPORTED_IMAGE_SUFFIXES, extract_upload_archive
 from backend.services.runtime_paths import RuntimePaths
 
@@ -54,6 +55,7 @@ SAFE_EVENT_PAYLOAD_KEYS = {
     "matched",
     "skipped",
     "error",
+    "detections_ready",
 }
 
 STATUS_PROGRESS = {
@@ -100,18 +102,31 @@ class JobService:
         self.engine = engine
         self.runtime_paths = runtime_paths or RuntimePaths(settings.resolve_runtime_root())
 
-    def create_public_job(self, mode: str) -> dict[str, str]:
-        payload_json = self._build_payload_for_mode(mode)
+    def create_public_job(
+        self,
+        mode: str,
+        *,
+        model_id: int | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        payload_json = self._build_payload_for_mode(mode, advanced_payload=payload)
         access_token = self._generate_access_token()
         access_token_hash = self._hash_access_token(access_token)
 
         with session_scope(self.engine) as session:
+            if mode == "advanced" and model_id is not None:
+                model = ModelRepository(session).get(model_id)
+                if model is None:
+                    raise LookupError(f"model not found: {model_id}")
+                if not model.visible_in_advanced_mode:
+                    raise ValueError("model is not visible in advanced mode")
             repo = JobRepository(session)
             job_code = self._generate_unique_job_code(repo)
             job = repo.create_job(
                 job_code=job_code,
                 access_token_hash=access_token_hash,
                 mode=mode,
+                model_id=model_id,
                 payload_json=payload_json,
             )
             created_job_code = job.job_code
@@ -133,6 +148,16 @@ class JobService:
                 return None
             events = repo.list_events(job.id)
             return self._serialize_public_job(job, events)
+
+    def get_public_job_id(self, job_code: str, access_token: str) -> int | None:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get_by_code(job_code)
+            if job is None:
+                return None
+            if not self._verify_access_token(access_token, job.access_token_hash):
+                return None
+            return job.id
 
     def accept_public_job_upload(
         self,
@@ -187,10 +212,54 @@ class JobService:
                 return None
             return self._resolve_result_zip(job)
 
+    def _resolve_public_result_dir(self, job_code: str, access_token: str) -> Path | None:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            job = repo.get_by_code(job_code)
+            if job is None:
+                return None
+            if not self._verify_access_token(access_token, job.access_token_hash):
+                return None
+            return self._resolve_result_dir(job)
+
+    def _resolve_admin_result_dir(self, job_id: int) -> Path | None:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            return self._resolve_result_dir(repo.get(job_id))
+
     def resolve_admin_result_zip(self, job_id: int) -> Path:
         with session_scope(self.engine) as session:
             repo = JobRepository(session)
             return self._resolve_result_zip(repo.get(job_id))
+
+    def get_public_detections(self, job_code: str, access_token: str) -> dict[str, Any] | None:
+        result_dir = self._resolve_public_result_dir(job_code, access_token)
+        if result_dir is None:
+            return None
+        return inference_adapter.read_detections_json(result_dir)
+
+    def get_admin_detections(self, job_id: int) -> dict[str, Any] | None:
+        result_dir = self._resolve_admin_result_dir(job_id)
+        if result_dir is None:
+            return None
+        return inference_adapter.read_detections_json(result_dir)
+
+    def resolve_public_result_image(
+        self,
+        job_code: str,
+        access_token: str,
+        rel_path: str,
+    ) -> Path | None:
+        result_dir = self._resolve_public_result_dir(job_code, access_token)
+        if result_dir is None:
+            return None
+        return self._safe_resolve_within(result_dir, rel_path)
+
+    def resolve_admin_result_image(self, job_id: int, rel_path: str) -> Path | None:
+        result_dir = self._resolve_admin_result_dir(job_id)
+        if result_dir is None:
+            return None
+        return self._safe_resolve_within(result_dir, rel_path)
 
     def cancel_job(self, job_id: int) -> dict[str, Any]:
         with session_scope(self.engine) as session:
@@ -221,14 +290,23 @@ class JobService:
                 raise LookupError("job not found")
             if not self._verify_access_token(access_token, job.access_token_hash):
                 raise LookupError("job not found")
-            if job.mode != "person_filter":
-                raise ValueError("only person_filter jobs accept public uploads")
+            if job.mode not in {"person_filter", "advanced"}:
+                raise ValueError("this job mode does not accept public uploads")
             if job.status != "created":
                 raise ValueError("job has already been uploaded or started")
 
-            model = ModelRepository(session).get_default_person_model()
+            if job.mode == "person_filter":
+                model = ModelRepository(session).get_default_person_model()
+                if model is None:
+                    raise ValueError("default person model is not configured")
+                return job.id, model.id
+
+            # advanced 模式：使用任务创建时绑定的 model_id（须已校验可见）。
+            if job.model_id is None:
+                raise ValueError("advanced job has no model bound")
+            model = ModelRepository(session).get(job.model_id)
             if model is None:
-                raise ValueError("default person model is not configured")
+                raise LookupError("bound model not found")
             return job.id, model.id
 
     def _persist_public_upload(
@@ -332,11 +410,16 @@ class JobService:
                 return job_code
         raise RuntimeError("failed to allocate unique job code")
 
-    def _build_payload_for_mode(self, mode: str) -> dict[str, Any]:
+    def _build_payload_for_mode(
+        self,
+        mode: str,
+        *,
+        advanced_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if mode == "person_filter":
             return normalize_job_payload(PERSON_FILTER_PAYLOAD)
         if mode == "advanced":
-            return normalize_job_payload(None)
+            return normalize_job_payload(advanced_payload)
         raise ValueError(f"unsupported job mode: {mode}")
 
     @staticmethod
@@ -364,6 +447,7 @@ class JobService:
             "events": [cls._serialize_event(event) for event in events],
             "error_message": job.error_message,
             "download_ready": cls._is_download_ready(job),
+            "summary": getattr(job, "summary_json", None),
         }
 
     @classmethod
@@ -388,6 +472,7 @@ class JobService:
                 "input_path": job.input_path,
                 "result_dir": job.result_dir,
                 "events": [cls._serialize_event(event) for event in events],
+                "summary": getattr(job, "summary_json", None),
             }
         )
         return payload
@@ -452,6 +537,32 @@ class JobService:
         if not cls._has_result_zip(job):
             raise FileNotFoundError("job result archive not found")
         return Path(job.result_zip_path)
+
+    @classmethod
+    def _resolve_result_dir(cls, job: Any) -> Path | None:
+        if not getattr(job, "result_dir", None):
+            return None
+        result_dir = Path(job.result_dir)
+        if not result_dir.is_dir():
+            return None
+        return result_dir
+
+    @classmethod
+    def _safe_resolve_within(cls, base: Path, rel_path: str) -> Path | None:
+        """解析 base 下的相对路径，拒绝路径遍历（..）与跳出 base 的结果。"""
+        if not rel_path:
+            return None
+        # 拒绝显式 .. 段，避免穿越。
+        if ".." in Path(rel_path).parts:
+            return None
+        candidate = (base / rel_path).resolve()
+        try:
+            candidate.relative_to(base.resolve())
+        except ValueError:
+            return None
+        if not candidate.is_file():
+            return None
+        return candidate
 
 
 @lru_cache(maxsize=1)

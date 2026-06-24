@@ -23,6 +23,7 @@ class JobRecord(Base):
     result_dir: Mapped[str | None] = mapped_column(Text(), nullable=True)
     result_zip_path: Mapped[str | None] = mapped_column(Text(), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    summary_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
 
 class ModelRecord(Base):
