@@ -50,6 +50,48 @@ export interface AdminJobDetail extends AdminJob {
   input_path: string | null;
   result_dir: string | null;
   events: AdminJobEvent[];
+  summary?: JobStats | null;
+}
+
+/** 任务统计（后端 JobRecord.summary_json）。 */
+export interface JobStats {
+  total?: number;
+  written?: number;
+  by_label?: Record<string, number>;
+  elapsed_sec?: number;
+  inference_sec?: number;
+  preprocess_sec?: number;
+  postprocess_sec?: number;
+  hardlink_sec?: number;
+  draw_sec?: number;
+  drawn?: number;
+  txt_written?: number;
+  hardlinked?: number;
+  copied?: number;
+  failed?: number;
+  used_batch?: number;
+  used_imgsz?: number[] | [number, number];
+  cuda_enabled?: boolean;
+  providers?: string[];
+}
+
+export interface AdminJobDetection {
+  filename: string;
+  rel_path?: string;
+  width: number;
+  height: number;
+  detections: Array<{
+    label: string;
+    confidence: number;
+    bbox: [number, number, number, number];
+    cls_id: number;
+  }>;
+  has_drawn: boolean;
+  drawn_path?: string | null;
+}
+
+export interface AdminJobDetectionsResponse {
+  images: AdminJobDetection[];
 }
 
 const DEFAULT_API_BASE_URL = "/api";
@@ -229,6 +271,58 @@ export async function downloadAdminJobResult(jobId: number): Promise<void> {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+export function buildAdminJobEventsUrl(jobId: number): string {
+  return `${resolveApiBaseUrl()}/admin/jobs/${jobId}/events`;
+}
+
+export function buildAdminJobImageUrl(jobId: number, relPath: string): string {
+  return `${resolveApiBaseUrl()}/admin/jobs/${jobId}/images/${encodePath(relPath)}`;
+}
+
+/** 订阅管理员任务 SSE 事件；返回取消订阅函数。 */
+export function subscribeAdminJobEvents(
+  jobId: number,
+  onEvent: (event: AdminJobEvent) => void,
+  onError?: (error: Event) => void,
+): () => void {
+  const url = buildAdminJobEventsUrl(jobId);
+  const source = new EventSource(url);
+
+  source.onmessage = (messageEvent) => {
+    try {
+      const parsed = JSON.parse(messageEvent.data) as AdminJobEvent;
+      onEvent(parsed);
+    } catch {
+      // 忽略 keepalive 注释与异常帧。
+    }
+  };
+
+  source.onerror = (event) => {
+    onError?.(event);
+  };
+
+  return () => source.close();
+}
+
+export async function getAdminJobDetections(
+  jobId: number,
+): Promise<AdminJobDetectionsResponse> {
+  const response = await adminFetch(`/admin/jobs/${jobId}/detections`);
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `get admin detections failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<AdminJobDetectionsResponse>;
+}
+
+function encodePath(relPath: string): string {
+  return relPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 async function readErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
