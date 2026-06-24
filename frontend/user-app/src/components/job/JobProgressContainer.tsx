@@ -25,6 +25,8 @@ interface JobProgressContainerProps {
   accessToken: string;
   initialStatus?: JobStatus;
   className?: string;
+  /** 状态变更回调，供外层加载结果可视化等。 */
+  onStatus?: (status: PublicJobStatus) => void;
 }
 
 function isTerminalStatus(status: JobStatus): boolean {
@@ -59,6 +61,7 @@ export function JobProgressContainer({
   accessToken,
   initialStatus = "created",
   className,
+  onStatus,
 }: JobProgressContainerProps) {
   const [result, setResult] = useState<PublicJobStatus | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -66,6 +69,8 @@ export function JobProgressContainer({
   const [pollTick, setPollTick] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
 
   const fetchStatus = useCallback(async () => {
     if (!jobCode.trim() || !accessToken.trim()) {
@@ -77,6 +82,7 @@ export function JobProgressContainer({
       if (stoppedRef.current) return;
       setResult(next);
       setErrorMessage(null);
+      onStatusRef.current?.(next);
     } catch (error) {
       if (stoppedRef.current) return;
       setErrorMessage(error instanceof Error ? error.message : "获取任务状态失败");

@@ -9,7 +9,7 @@
 - `gateway/`：Nginx 统一入口，将用户前台、管理员后台和 `/api/` 转发到同一端口。
 - `webui/`：旧版 Gradio 工具链与 `webui.processing.run_inference` 推理实现，后端 `TaskRunner` 通过适配层复用它。
 
-当前阶段已经打通人员筛选模式的任务创建、图片/压缩包上传、归档解压、任务入队、状态/关键日志查询和已完成任务结果下载链路。高级模式仍只支持公开模型列表和任务凭证基础能力，模型参数与文件上传提交尚未接入公开 API。
+当前阶段已经打通人员筛选与高级模式的任务创建、图片/压缩包上传、归档解压、任务入队、状态/关键日志与 SSE 实时事件查询、逐图检测结果与结果图片获取、已完成任务结果下载链路。高级模式已支持 `model_id` 与 `payload`（conf/iou/batch/imgsz/draw_boxes/save_txt 等，服务端 normalize 合并默认值）创建任务并上传文件入队。
 
 ## 目录结构
 
@@ -163,9 +163,12 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 公开接口：
 
 - `GET /api/healthz`
-- `POST /api/jobs`
+- `POST /api/jobs`（支持 `mode`、`model_id`、`payload`，高级模式可传 conf/iou/batch/imgsz/draw_boxes/save_txt 等）
 - `POST /api/jobs/{job_code}/upload?access_token=...`
-- `GET /api/jobs/{job_code}?access_token=...`
+- `GET /api/jobs/{job_code}?access_token=...`（含 `summary` 统计字段）
+- `GET /api/jobs/{job_code}/events?access_token=...`（SSE 实时事件流）
+- `GET /api/jobs/{job_code}/detections?access_token=...`（逐图检测结果）
+- `GET /api/jobs/{job_code}/images/{file_path}?access_token=...`（结果图片，含路径遍历防护）
 - `GET /api/jobs/{job_code}/download?access_token=...`
 - `GET /api/jobs/models`
 
@@ -181,6 +184,9 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 - `PUT /api/admin/configs/concurrency`
 - `GET /api/admin/jobs`
 - `GET /api/admin/jobs/{job_id}`
+- `GET /api/admin/jobs/{job_id}/events`（SSE 实时事件流）
+- `GET /api/admin/jobs/{job_id}/detections`
+- `GET /api/admin/jobs/{job_id}/images/{file_path}`
 - `GET /api/admin/jobs/{job_id}/download`
 - `POST /api/admin/jobs/{job_id}/cancel`
 - `POST /api/admin/jobs/{job_id}/retry`
@@ -212,4 +218,6 @@ cd frontend/user-app && npm run build
 - `webui/` 仍可用于旧工具链调试，后端推理适配层继续复用 `webui.processing`。
 - 当前 Compose 不再启动 MongoDB，也不使用 `fo_data/`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如部署环境需要固定 GPU，请在 `backend.deploy.resources.reservations.devices` 中配置 `device_ids`。
-- 公开前台的人员筛选模式可上传图片或 `.zip` 压缩包，后端会解压支持的图片、绑定已发布的默认人员模型并入队执行；`.zip` 每次都会重新上传并解压到当前任务目录；高级模式的模型参数与文件上传提交仍需后续接入。
+- 公开前台的人员筛选模式可上传图片或 `.zip` 压缩包，后端会解压支持的图片、绑定已发布的默认人员模型并入队执行；`.zip` 每次都会重新上传并解压到当前任务目录；高级模式已支持自定义 `model_id` 与 `payload` 参数并上传文件入队。
+- SSE 实时事件推送基于进程内内存事件总线，仅适用于单 worker Uvicorn 部署；多 worker 需引入 Redis pub/sub（本次未实现）。前端在 SSE 不可用时自动降级为轮询。
+- 任务完成后会落盘 `summary_json` 统计（by_label/耗时/批次/设备等）与逐图检测结果 `_detections.json`，并随结果压缩包打包。
