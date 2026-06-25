@@ -1,0 +1,503 @@
+# OpenCodeReview - GitHub Actions PR 自动审查
+#
+# 当 PR 被打开、推送新提交、重新打开时，自动运行代码审查并发布评论。
+# 同时支持通过评论触发手动重新审查。
+#
+# 触发条件：
+#   - PR opened / synchronize / reopened（自动审查）
+#   - PR 评论包含 '/open-code-review' 或 '@open-code-review'（手动触发）
+#
+# 必需 Secrets（在 Settings → Secrets and variables → Actions 配置）：
+#   OCR_LLM_URL        - LLM API 地址（OpenAI 兼容格式）
+#   OCR_LLM_AUTH_TOKEN - API 认证 Token
+#
+# 可选 Secrets：
+#   OCR_LLM_MODEL      - 模型名称（默认 gpt-4o）
+#   OCR_LLM_USE_ANTHROPIC - 使用 Anthropic Claude 模型时设为 'true'
+
+name: OpenCodeReview PR Review
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  # 使用 pull_request_target 使 fork PR 也能访问 secrets
+  # OCR 只读 diff，不执行 PR 代码，安全无虞
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  code-review:
+    runs-on: ubuntu-latest
+    # 在 PR 事件或评论触发关键字时运行
+    if: |
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '/open-code-review')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.comment.body, '@open-code-review'))
+    steps:
+      - name: 获取 PR 上下文（评论触发时）
+        id: pr-context
+        if: github.event_name != 'pull_request_target'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const { data: pullRequest } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            core.setOutput('base_ref', pullRequest.base.ref);
+            core.setOutput('head_ref', pullRequest.head.ref);
+            core.setOutput('head_sha', pullRequest.head.sha);
+            core.setOutput('pr_title', pullRequest.title);
+
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || steps.pr-context.outputs.head_sha }}
+
+      - name: 获取 PR head ref（确保 fork 提交可访问）
+        run: git fetch origin pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 OpenCodeReview
+        run: |
+          npm install -g @alibaba-group/open-code-review
+          echo "OpenCodeReview 版本："
+          ocr version || true
+
+      - name: 配置 OCR
+        run: |
+          ocr config set llm.url ${{ secrets.OCR_LLM_URL }}
+          ocr config set llm.auth_token ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          ocr config set llm.model ${{ secrets.OCR_LLM_MODEL }}
+          ocr config set llm.use_anthropic ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
+          ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+
+      - name: 运行 OpenCodeReview
+        id: review
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            PR_TITLE="${{ github.event.pull_request.title }}"
+          else
+            BASE_REF="${{ steps.pr-context.outputs.base_ref }}"
+            HEAD_SHA="${{ steps.pr-context.outputs.head_sha }}"
+            PR_TITLE="${{ steps.pr-context.outputs.pr_title }}"
+          fi
+
+          echo "审查 PR：${HEAD_SHA} 对比 origin/${BASE_REF}"
+          echo "PR 标题：${PR_TITLE}"
+
+          # 如果项目中有自定义规则文件，使用它
+          RULE_FLAG=""
+          if [ -f ".opencodereview/rule.json" ]; then
+            RULE_FLAG="--rule .opencodereview/rule.json"
+            echo "使用项目审查规则：.opencodereview/rule.json"
+          fi
+
+          # 运行 OCR，输出 JSON 格式结果
+          ocr review \
+            --from "origin/${BASE_REF}" \
+            --to "${HEAD_SHA}" \
+            --background "PR Title: ${PR_TITLE}" \
+            --format json \
+            ${RULE_FLAG} \
+            > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
+
+          echo "OCR 审查完成。输出："
+          cat /tmp/ocr-result.json
+          echo "OCR 审查错误日志："
+          cat /tmp/ocr-stderr.log
+
+      - name: 发布审查评论到 PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = '/tmp/ocr-result.json';
+
+            // 读取 OCR 输出
+            let result;
+            try {
+              const raw = fs.readFileSync(path, 'utf8');
+              result = JSON.parse(raw);
+            } catch (e) {
+              console.log('解析 OCR 输出失败：', e.message);
+              const stderr = fs.readFileSync('/tmp/ocr-stderr.log', 'utf8').trim();
+              if (stderr) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: `⚠️ **OpenCodeReview** 遇到错误：\n${fencedBlock(stderr)}`
+                });
+              }
+              return;
+            }
+
+            const comments = result.comments || [];
+            const warnings = result.warnings || [];
+
+            // 没有发现问题的处理
+            if (comments.length === 0) {
+              const message = result.message || '未发现代码问题。看起来不错！✨';
+              // 删除之前可能存在的审查结论评论，追加新结论
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `✅ **OpenCodeReview 审查结论**：${message}`
+              });
+              return;
+            }
+
+            // 准备 PR review（含行内评论）
+            const prNumber = context.issue.number;
+            let commitSha;
+
+            if (context.eventName === 'pull_request_target') {
+              commitSha = context.payload.pull_request.head.sha;
+            } else {
+              const { data: pullRequest } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              commitSha = pullRequest.head.sha;
+            }
+
+            const reviewComments = [];
+            const commentsWithoutLine = [];
+
+            for (const comment of comments) {
+              const body = formatComment(comment);
+
+              const hasValidLine = (comment.start_line >= 1) || (comment.end_line >= 1);
+              if (!hasValidLine) {
+                commentsWithoutLine.push({ comment, body });
+                continue;
+              }
+
+              const reviewComment = {
+                path: comment.path,
+                body: body
+              };
+
+              if (comment.start_line >= 1 && comment.end_line >= 1 && comment.start_line !== comment.end_line) {
+                reviewComment.start_line = comment.start_line;
+                reviewComment.line = comment.end_line;
+                reviewComment.start_side = 'RIGHT';
+                reviewComment.side = 'RIGHT';
+              } else if (comment.end_line >= 1) {
+                reviewComment.line = comment.end_line;
+                reviewComment.side = 'RIGHT';
+              } else if (comment.start_line >= 1) {
+                reviewComment.line = comment.start_line;
+                reviewComment.side = 'RIGHT';
+              }
+
+              reviewComments.push({ comment, reviewComment });
+            }
+
+            // 提交行内评论
+            const totalCount = comments.length;
+            const inlineCount = reviewComments.length;
+            const summaryCount = commentsWithoutLine.length;
+            let summaryBody = `🔍 **OpenCodeReview 审查结论**：发现 **${totalCount}** 个问题。`;
+            summaryBody += `\n- ✅ ${inlineCount} 个以行内评论形式发布`;
+            summaryBody += `\n- 📝 ${summaryCount} 个在下方汇总`;
+            if (warnings.length > 0) {
+              summaryBody += `\n\n⚠️ 审查过程中出现 ${warnings.length} 个警告。`;
+            }
+            summaryBody += formatSummaryComments(commentsWithoutLine);
+
+            let successCount = 0;
+            let failedCount = 0;
+            const failedComments = [];
+
+            try {
+              const batchRes = await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                commit_id: commitSha,
+                body: summaryBody,
+                event: 'COMMENT',
+                comments: reviewComments.map(({ reviewComment }) => reviewComment)
+              });
+              successCount = reviewComments.length;
+              console.log(`成功发布审查，包含 ${successCount} 条行内评论（${commentsWithoutLine.length} 条在摘要中）`);
+              logRateLimitQuota(batchRes, 'after batch createReview');
+            } catch (e) {
+              console.log('批量发布审查失败：', e.message);
+              console.log('降级为逐条发布（含速率限制处理）...');
+
+              const MAX_RETRIES = parseInt(process.env.OCR_MAX_RETRIES, 10) || 3;
+              const SUCCESS_DELAY = parseInt(process.env.OCR_SUCCESS_DELAY, 10) || 2000;
+              const FAILURE_DELAY = parseInt(process.env.OCR_FAILURE_DELAY, 10) || 1000;
+              const LOW_REMAINING_THRESHOLD = parseInt(process.env.OCR_LOW_REMAINING_THRESHOLD, 10) || 3;
+              const LOW_REMAINING_SPACING = parseInt(process.env.OCR_LOW_REMAINING_SPACING, 10) || 10000;
+
+              const batchRetry = computeRetryDelayMs(e, 0);
+              if (batchRetry != null) {
+                const secs = (batchRetry.delayMs / 1000).toFixed(1);
+                console.log(
+                  `批量创建审查被速率限制 (HTTP ${e.status})。` +
+                  `等待 ${secs}s（来源：'${batchRetry.source}'，${batchRetry.detail}）后逐条重试。`
+                );
+                await sleep(batchRetry.delayMs);
+              }
+
+              for (const { comment, reviewComment } of reviewComments) {
+                let posted = false;
+                for (let attempt = 0; attempt <= MAX_RETRIES && !posted; attempt++) {
+                  try {
+                    const res = await github.rest.pulls.createReview({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      pull_number: prNumber,
+                      commit_id: commitSha,
+                      body: '',
+                      event: 'COMMENT',
+                      comments: [reviewComment]
+                    });
+                    successCount++;
+                    posted = true;
+                    console.log(`成功发布评论：${reviewComment.path}`);
+
+                    const remaining = logRateLimitQuota(res, `after ${reviewComment.path}`);
+                    const lowQuota = remaining != null && remaining <= LOW_REMAINING_THRESHOLD;
+                    if (lowQuota) {
+                      console.log(`[速率限制] 配额低 (remaining=${remaining} <= ${LOW_REMAINING_THRESHOLD})；延迟 ${LOW_REMAINING_SPACING}ms`);
+                      await sleep(LOW_REMAINING_SPACING);
+                    } else {
+                      await sleep(SUCCESS_DELAY);
+                    }
+                  } catch (innerE) {
+                    const retryInfo = computeRetryDelayMs(innerE, attempt);
+                    const willRetry = retryInfo != null && attempt < MAX_RETRIES;
+                    if (willRetry) {
+                      const secs = (retryInfo.delayMs / 1000).toFixed(1);
+                      console.log(
+                        `速率限制/瞬时错误：${reviewComment.path} ` +
+                        `(HTTP ${innerE.status}, 尝试 ${attempt + 1}/${MAX_RETRIES})。` +
+                        `等待 ${secs}s（来源：'${retryInfo.source}'，${retryInfo.detail}）。` +
+                        `错误：${innerE.message}`
+                      );
+                      await sleep(retryInfo.delayMs);
+                    } else {
+                      failedCount++;
+                      failedComments.push({ comment, error: innerE.message });
+                      const reason = retryInfo == null ? '不可重试错误' : '重试次数已耗尽';
+                      console.log(`发布评论失败：${reviewComment.path} (${reason}, HTTP ${innerE.status || 'n/a'})：${innerE.message}`);
+                      await sleep(retryInfo == null ? FAILURE_DELAY : SUCCESS_DELAY);
+                      break;
+                    }
+                  }
+                }
+              }
+
+              // 发布汇总评论
+              let finalBody = `🔍 **OpenCodeReview 审查结论**：发现 **${totalCount}** 个问题。`;
+              finalBody += `\n- ✅ 成功发布：${successCount} 条`;
+              if (commentsWithoutLine.length > 0) {
+                finalBody += `\n- 📝 汇总评论：${commentsWithoutLine.length} 条`;
+              }
+              if (failedCount > 0) {
+                finalBody += `\n- ❌ 发布失败：${failedCount} 条`;
+              }
+              if (warnings.length > 0) {
+                finalBody += `\n\n⚠️ ${warnings.length} 个警告。`;
+              }
+              finalBody += formatSummaryComments(commentsWithoutLine);
+              finalBody += `\n\n---\n\n📊 **发布统计：**`;
+              finalBody += `\n- ✅ 成功：${successCount} 条`;
+              if (failedCount > 0) {
+                finalBody += `\n- ❌ 失败：${failedCount} 条`;
+              }
+
+              if (failedComments.length > 0) {
+                finalBody += '\n\n---\n\n### ⚠️ 以下评论以摘要形式展示（未能作为行内评论发布）';
+                for (const { comment, error } of failedComments) {
+                  finalBody += '\n\n---\n\n';
+                  finalBody += formatCommentMarkdown(comment, error);
+                }
+              }
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: finalBody
+              });
+            }
+
+            // --- 工具函数 ---
+
+            function sleep(ms) {
+              return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            function getHeader(headers, name) {
+              const v = headers[name] != null ? headers[name] : headers[name.toLowerCase()];
+              return v != null ? String(v).trim() : undefined;
+            }
+
+            function computeRetryDelayMs(error, attempt) {
+              if (!error) return null;
+              const status = error.status;
+              const message = String(error.message || '');
+              const isRateLimit = status === 429 || (status === 403 && /rate limit|abuse|secondary/i.test(message));
+              const isTransient = (status >= 500 && status < 600) || status === 408;
+              if (!isRateLimit && !isTransient) return null;
+
+              const headers = ((error.response || {}).headers) || {};
+              const header = (name) => getHeader(headers, name);
+              const nowSec = Math.floor(Date.now() / 1000);
+
+              const cap = parseInt(process.env.OCR_RETRY_MAX_DELAY, 10) || 300000;
+              const base = parseInt(process.env.OCR_RETRY_BASE_DELAY, 10) || 60000;
+
+              let info = null;
+
+              if (isRateLimit) {
+                const retryAfter = header('retry-after');
+                if (retryAfter) {
+                  const secs = Number(retryAfter);
+                  if (!isNaN(secs) && secs >= 0) {
+                    info = { rawMs: secs * 1000, source: 'retry-after', detail: `${secs}s (from header)` };
+                  } else {
+                    const dateMs = Date.parse(retryAfter);
+                    if (!isNaN(dateMs)) {
+                      info = { rawMs: Math.max(0, dateMs - Date.now()), source: 'retry-after (HTTP-date)', detail: retryAfter };
+                    }
+                  }
+                }
+
+                if (!info) {
+                  const remaining = header('x-ratelimit-remaining');
+                  const reset = header('x-ratelimit-reset');
+                  if (reset != null && Number(remaining) === 0) {
+                    const rawMs = Math.max(0, Number(reset) - nowSec) * 1000;
+                    info = { rawMs, source: 'x-ratelimit-reset', detail: `remaining=0, reset epoch=${reset} (in ${Math.ceil(rawMs / 1000)}s)` };
+                  }
+                }
+
+                if (!info) {
+                  const backoff = Math.min(base * Math.pow(2, attempt), cap);
+                  const jitter = Math.floor(Math.random() * 1000);
+                  info = { rawMs: backoff + jitter, source: 'exponential-backoff', detail: `base=${base}ms*2^${attempt} (cap ${cap}ms) +${jitter}ms jitter` };
+                }
+              } else {
+                const transientBase = 2000;
+                const backoff = Math.min(transientBase * Math.pow(2, attempt), cap);
+                const jitter = Math.floor(Math.random() * 1000);
+                info = { rawMs: backoff + jitter, source: 'transient-backoff', detail: `base=${transientBase}ms*2^${attempt} (cap ${cap}ms) +${jitter}ms jitter (HTTP ${status})` };
+              }
+
+              const delayMs = Math.min(info.rawMs, cap);
+              if (delayMs < info.rawMs) {
+                info.detail += ` [CAPPED to ${cap}ms; GitHub recommended ${Math.ceil(info.rawMs / 1000)}s]`;
+              }
+              return { delayMs, source: info.source, detail: info.detail };
+            }
+
+            function logRateLimitQuota(response, tag) {
+              try {
+                const h = (response && response.headers) || {};
+                const header = (name) => getHeader(h, name);
+                const remaining = header('x-ratelimit-remaining');
+                const limit = header('x-ratelimit-limit');
+                const reset = header('x-ratelimit-reset');
+                if (remaining != null) {
+                  console.log(
+                    `[rate-limit] ${tag}: remaining=${remaining}/${limit != null ? limit : '?'}` +
+                    (reset != null ? `, reset epoch=${reset}` : '')
+                  );
+                }
+                return remaining != null ? Number(remaining) : null;
+              } catch (_) { return null; }
+            }
+
+            function formatComment(comment) {
+              let body = comment.content || '';
+
+              if (comment.suggestion_code && comment.existing_code) {
+                body += '\n\n**建议修改：**\n';
+                body += fencedBlock(comment.suggestion_code, 'suggestion');
+              }
+
+              return body;
+            }
+
+            function formatCommentMarkdown(comment, error) {
+              let md = `### 📄 \`${comment.path}\``;
+              if (comment.start_line && comment.end_line) {
+                md += ` (L${comment.start_line}-L${comment.end_line})`;
+              }
+              md += '\n\n';
+              if (error) {
+                md += `⚠️ GitHub 无法将此评论发布为行内评论：${error}\n\n`;
+              }
+              md += comment.content || '';
+
+              if (comment.suggestion_code && comment.existing_code) {
+                md += '\n\n<details><summary>💡 建议修改</summary>\n\n';
+                md += '**修改前：**\n' + fencedBlock(comment.existing_code) + '\n\n';
+                md += '**修改后：**\n' + fencedBlock(comment.suggestion_code) + '\n\n';
+                md += '</details>';
+              }
+
+              return md;
+            }
+
+            function buildSummaryBody(totalCount, inlineCount, summaryCount, warnings) {
+              let body = `🔍 **OpenCodeReview 审查结论**：发现 **${totalCount}** 个问题。`;
+              if (totalCount > 0) {
+                body += `\n- ✅ ${inlineCount} 个以行内评论形式发布`;
+                body += `\n- 📝 ${summaryCount} 个在下方汇总`;
+              }
+              if (warnings.length > 0) {
+                body += `\n\n⚠️ 审查过程中出现 ${warnings.length} 个警告。`;
+              }
+              return body;
+            }
+
+            function formatSummaryComments(summaryComments) {
+              let body = '';
+              for (const { comment } of summaryComments) {
+                body += '\n\n---\n\n';
+                body += formatCommentMarkdown(comment);
+              }
+              return body;
+            }
+
+            function fencedBlock(content, language = '') {
+              const text = String(content || '');
+              const fence = safeFence(text);
+              let block = fence + language + '\n' + text;
+              if (!text.endsWith('\n')) block += '\n';
+              return block + fence;
+            }
+
+            function safeFence(content) {
+              const matches = String(content || '').match(/`+/g) || [];
+              const maxTicks = matches.reduce((max, ticks) => Math.max(max, ticks.length), 0);
+              return '`'.repeat(Math.max(3, maxTicks + 1));
+            }
