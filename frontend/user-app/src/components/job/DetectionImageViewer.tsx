@@ -40,7 +40,7 @@ export function DetectionImageViewer({
 
   const active = images[Math.min(activeIdx, images.length - 1)];
   const activeSrc = active.drawn_path
-    ? buildJobImageUrl(jobCode, accessToken, active.rel_path ?? active.drawn_path)
+    ? buildJobImageUrl(jobCode, accessToken, active.drawn_path)
     : buildJobImageUrl(jobCode, accessToken, active.rel_path ?? active.filename);
 
   return (

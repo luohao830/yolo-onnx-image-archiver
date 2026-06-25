@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from webui.label_utils import (
+    _label_from_id,
     _safe_annotated_name,
     format_seconds_human,
     normalize_execution_device,
@@ -773,8 +774,13 @@ def run_inference(
             drawn_path = drawn_paths.get(bi)
             if det is not None:
                 xyxy, cls_ids, scores = det
-                for idx in range(int(xyxy.shape[0])):
-                    box = xyxy[idx]
+                # 将 letterbox 坐标转换回原图尺寸
+                if width > 0 and height > 0:
+                    xyxy_orig = _xyxy_letterbox_to_original(xyxy, (height, width), final_imgsz)
+                else:
+                    xyxy_orig = xyxy
+                for idx in range(int(xyxy_orig.shape[0])):
+                    box = xyxy_orig[idx]
                     cls_id_i = int(cls_ids[idx])
                     detections.append(
                         {
@@ -1013,7 +1019,7 @@ def run_inference(
                     ok = cv2.imwrite(str(dest), canvas)
                     if ok:
                         local_drawn += 1
-                        drawn_paths[bi] = str(dest)
+                        drawn_paths[bi] = str(dest.relative_to(out_dir))
                     else:
                         local_failed += 1
                         raise ValueError(f"画框图片写入失败: {dest}")

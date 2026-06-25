@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 
 from backend.api.deps import require_admin_sse
 from backend.services.event_bus import EventBus
+from backend.services.job_presenter import JobPresenter
 from backend.services.job_service import JobService, get_job_service
 
 
@@ -30,6 +31,7 @@ async def _stream_events(
     topic: str,
     history: list[dict[str, Any]],
     bus: EventBus | None,
+    filter_public: bool = False,
 ) -> AsyncIterator[bytes]:
     # 先回放历史事件。
     for event in history:
@@ -47,11 +49,21 @@ async def _stream_events(
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_SECONDS)
+                if filter_public:
+                    event = _filter_event_for_public(event)
                 yield _sse(event)
             except asyncio.TimeoutError:
                 yield b": keepalive\n\n"
     finally:
         bus.unsubscribe(topic, queue)
+
+
+def _filter_event_for_public(event: dict[str, Any]) -> dict[str, Any]:
+    """对公开 SSE 实时事件过滤掉服务器路径等内部字段。"""
+    if "payload_json" in event and isinstance(event["payload_json"], dict):
+        event = dict(event)
+        event["payload_json"] = JobPresenter.sanitize_event_payload(event["payload_json"])
+    return event
 
 
 @router.get("/jobs/{job_code}/events")
@@ -72,7 +84,7 @@ async def stream_public_job_events(
     events = job.get("events", [])
     bus = _event_bus_from_request(request)
     return StreamingResponse(
-        _stream_events(topic=f"job:{job_id}", history=events, bus=bus),
+        _stream_events(topic=f"job:{job_id}", history=events, bus=bus, filter_public=True),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

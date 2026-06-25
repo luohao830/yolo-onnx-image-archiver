@@ -41,6 +41,43 @@ def normalize_job_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     return normalized
 
 
+def validate_job_payload(payload: dict[str, Any]) -> None:
+    """校验高级模式推理参数的取值范围，拒绝无效输入。"""
+    _require_positive_int(payload, "batch")
+    _require_positive_int(payload, "preprocess_workers")
+    _require_non_negative_int(payload, "prefetch_batches")
+    if payload.get("imgsz") is not None:
+        _require_positive_int(payload, "imgsz")
+    _require_float_in_range(payload, "conf", 0.0, 1.0)
+    _require_float_in_range(payload, "iou", 0.0, 1.0)
+
+
+def _require_positive_int(payload: dict[str, Any], key: str) -> None:
+    val = payload.get(key)
+    if val is None:
+        return
+    if not isinstance(val, (int, float)) or int(val) <= 0:
+        raise ValueError(f"{key} must be a positive integer, got {val!r}")
+
+
+def _require_non_negative_int(payload: dict[str, Any], key: str) -> None:
+    val = payload.get(key)
+    if val is None:
+        return
+    if not isinstance(val, (int, float)) or int(val) < 0:
+        raise ValueError(f"{key} must be a non-negative integer, got {val!r}")
+
+
+def _require_float_in_range(payload: dict[str, Any], key: str, lo: float, hi: float) -> None:
+    val = payload.get(key)
+    if val is None:
+        return
+    if not isinstance(val, (int, float)):
+        raise ValueError(f"{key} must be a number, got {val!r}")
+    if not (lo <= float(val) <= hi):
+        raise ValueError(f"{key} must be in [{lo}, {hi}], got {float(val)}")
+
+
 class JobModeHandler(Protocol):
     """任务模式处理器：payload 构造、创建校验、上传时模型解析。"""
 
@@ -76,7 +113,9 @@ class AdvancedModeHandler:
     """高级模式：创建时校验模型存在且可见，上传时使用绑定的 model_id。"""
 
     def build_payload(self, advanced_payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        return normalize_job_payload(advanced_payload)
+        normalized = normalize_job_payload(advanced_payload)
+        validate_job_payload(normalized)
+        return normalized
 
     def validate_create(self, session: Session, model_id: int | None) -> None:
         if model_id is None:
@@ -84,6 +123,8 @@ class AdvancedModeHandler:
         model = ModelRepository(session).get(model_id)
         if model is None:
             raise LookupError(f"model not found: {model_id}")
+        if not model.enabled:
+            raise ValueError("model is not enabled")
         if not model.visible_in_advanced_mode:
             raise ValueError("model is not visible in advanced mode")
 
