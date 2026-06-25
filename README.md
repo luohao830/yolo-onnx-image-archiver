@@ -213,3 +213,4 @@ cd frontend/user-app && npm run build
 - 当前 Compose 不再启动 MongoDB，也不使用 `fo_data/`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如部署环境需要固定 GPU，请在 `backend.deploy.resources.reservations.devices` 中配置 `device_ids`。
 - 公开前台的人员筛选模式可上传图片或 `.zip` 压缩包，后端会解压支持的图片、绑定已发布的默认人员模型并入队执行；`.zip` 每次都会重新上传并解压到当前任务目录；高级模式的模型参数与文件上传提交仍需后续接入。
+# OCR 工作流验证测试 v2
