@@ -1,0 +1,65 @@
+{
+  "rules": [
+    {
+      "path": "backend/**/*.py",
+      "rule": "Review Python code for: SQL injection via raw SQL or unescaped f-strings in queries, path traversal in file operations, hardcoded secrets or API keys, improper exception handling that exposes internal details, missing input validation before processing user data, race conditions in async code, and ensure proper type hints are used on all function signatures. Check that all database queries use parameterized statements and that sensitive operations are properly authenticated.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/api/routes/**/*.py",
+      "rule": "Review API routes for: missing or inconsistent authentication/authorization checks especially on admin endpoints, improper HTTP status codes, inconsistent error response format, missing Pydantic validation schemas for request bodies, potential DoS via unbounded request sizes, and ensure all endpoints return proper Content-Type headers. Verify admin routes use the require_admin dependency and public routes do not leak admin functionality.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/db/**/*.py",
+      "rule": "Review database code for: SQL injection vulnerabilities in raw queries, missing session lifecycle management (leaked sessions), N+1 query patterns, missing indexes on frequently queried columns, and ensure all schema changes are properly reflected in the models. Check that SQLAlchemy sessions are properly closed in finally blocks or context managers.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "backend/services/**/*.py",
+      "rule": "Review service layer for: proper separation of concerns (business logic only, no HTTP concerns), proper error propagation instead of silent swallowing, correct transaction boundaries, and ensure file I/O operations handle edge cases (missing files, permission errors, disk full). Check that long-running operations are properly cancellable and report progress.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/**/*.{ts,tsx}",
+      "rule": "Review frontend code for: XSS vulnerabilities especially via dangerouslySetInnerHTML or direct DOM manipulation, missing React hook dependency arrays (exhaustive-deps), missing error boundaries around component trees, hardcoded API keys or secrets in client code, improper handling of async states (loading/error/empty), missing ARIA attributes on interactive elements, and use of 'any' type instead of proper TypeScript types. Ensure API error responses are properly handled and user-friendly error messages are shown.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "frontend/src/api/**/*.ts",
+      "rule": "Review API client code for: proper request/response typing, consistent error handling across all endpoints, proper token management (no hardcoded tokens), correct base URL configuration, and ensure all API calls handle network errors and non-2xx responses gracefully.",
+      "merge_system_rule": true
+    },
+    {
+      "path": "gateway/**",
+      "rule": "Review Nginx configuration for: security headers (HSTS, X-Frame-Options, X-Content-Type-Options), proper TLS configuration, exposed internal services, overly permissive CORS settings, and ensure client_max_body_size is consistent with backend limits. Check for directory traversal risks in proxy_pass directives.",
+      "merge_system_rule": false
+    },
+    {
+      "path": "{Dockerfile,docker-compose.yml,docker-compose.*.yml}",
+      "rule": "Review Docker configuration for: running containers as root without USER directive, exposed unnecessary ports, hardcoded secrets in environment variables or build args, missing HEALTHCHECK, running latest/untagged base images, and ensure proper restart policies are set for production services. Check for COPY/ADD security best practices.",
+      "merge_system_rule": false
+    }
+  ],
+  "include": [
+    "backend/**/*.py",
+    "frontend/**/*.{ts,tsx}",
+    "gateway/**",
+    "Dockerfile",
+    "docker-compose.yml",
+    "docker-compose.*.yml"
+  ],
+  "exclude": [
+    "**/__pycache__/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/.git/**",
+    "runtime/**",
+    "webui/**",
+    "models/**",
+    "images/**",
+    "**/*.min.js",
+    "**/package-lock.json",
+    "**/*.pyc"
+  ]
+}
