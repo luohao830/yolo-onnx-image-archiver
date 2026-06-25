@@ -94,6 +94,7 @@ jobs:
           if [ -n "${OCR_LLM_USE_ANTHROPIC}" ]; then
             ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC}"
           fi
+          ocr config set language Chinese
           ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
 
       - name: 运行 OpenCodeReview
