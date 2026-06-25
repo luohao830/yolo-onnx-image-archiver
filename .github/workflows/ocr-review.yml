@@ -86,6 +86,10 @@ jobs:
           OCR_LLM_MODEL: ${{ secrets.OCR_LLM_MODEL }}
           OCR_LLM_USE_ANTHROPIC: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
         run: |
+          if [ -z "${OCR_LLM_URL}" ] || [ -z "${OCR_LLM_AUTH_TOKEN}" ]; then
+            echo "错误：OCR_LLM_URL 和 OCR_LLM_AUTH_TOKEN 为必填项，请检查仓库 Secrets 配置。"
+            exit 1
+          fi
           ocr config set llm.url "${OCR_LLM_URL}"
           ocr config set llm.auth_token "${OCR_LLM_AUTH_TOKEN}"
           if [ -n "${OCR_LLM_MODEL}" ]; then
