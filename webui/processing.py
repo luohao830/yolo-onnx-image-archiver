@@ -13,7 +13,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
+from webui.label_utils import (
+    _safe_annotated_name,
+    format_seconds_human,
+    normalize_execution_device,
+    sanitize_label,
+)
 from webui.utils import get_logger, sanitize_filename, unique_path
+from webui.yolo_postprocess import (
+    _build_batch_detections,
+    _color_for_class,
+    _draw_boxes,
+    _maybe_sigmoid,
+    _nms_xyxy,
+    _normalize_yolo_output,
+    _write_yolo_txt,
+    _xyxy_letterbox_to_original,
+)
 
 
 logger = get_logger(__name__)
@@ -84,8 +100,8 @@ class BatchWorkSummary:
     draw_batch_sec: float
 
 
-def sanitize_label(label: str, fallback: str = "unknown") -> str:
-    return sanitize_filename(label, fallback=fallback)
+# sanitize_label / normalize_execution_device / format_seconds_human / _safe_annotated_name
+# → webui/label_utils.py
 
 
 def iter_images(root: Path, recursive: bool) -> Iterator[Path]:
@@ -234,175 +250,7 @@ def _letterbox(
     return canvas
 
 
-def _nms_xyxy(boxes, scores, iou_thres: float) -> List[int]:
-    import numpy as np
-
-    x1 = boxes[:, 0]
-    y1 = boxes[:, 1]
-    x2 = boxes[:, 2]
-    y2 = boxes[:, 3]
-    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-    order = scores.argsort()[::-1]
-
-    keep: List[int] = []
-    while order.size > 0:
-        i = int(order[0])
-        keep.append(i)
-        if order.size == 1:
-            break
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-
-        w = np.maximum(0.0, xx2 - xx1 + 1)
-        h = np.maximum(0.0, yy2 - yy1 + 1)
-        inter = w * h
-        iou = inter / (areas[i] + areas[order[1:]] - inter)
-
-        inds = np.where(iou <= iou_thres)[0]
-        order = order[inds + 1]
-    return keep
-
-
-def _normalize_yolo_output(out) -> "object":
-    """
-    Normalize common YOLO ONNX output layouts to [B, N, (5+num_cls)].
-
-    Common cases:
-    - [B, N, C] where C>=6
-    - [B, C, N] (Ultralytics often exports YOLO11 as [B, 84, 8400])
-    """
-    import numpy as np
-
-    if out.ndim != 3:
-        raise ValueError(f"不支持的输出维度: {out.shape}")
-
-    b, d1, d2 = out.shape
-    if d2 >= 6:
-        # already [B, N, C]
-        return out
-
-    # try [B, C, N] -> [B, N, C]
-    if d1 >= 6:
-        return np.transpose(out, (0, 2, 1))
-
-    raise ValueError(f"不支持的输出形状: {out.shape}（无法归一化为 [B,N,5+num_cls]）")
-
-
-def _maybe_sigmoid(x):
-    import numpy as np
-
-    x = x.astype(np.float32, copy=False)
-    try:
-        vmax = float(np.nanmax(x))
-        vmin = float(np.nanmin(x))
-    except Exception:  # noqa: BLE001
-        return x
-    if vmax > 1.0 or vmin < 0.0:
-        return 1.0 / (1.0 + np.exp(-x))
-    return x
-
-
-def _color_for_class(cls_id: int) -> Tuple[int, int, int]:
-    import colorsys
-
-    hue = (int(cls_id) * 0.61803398875) % 1.0
-    r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 0.95)
-    return int(b * 255), int(g * 255), int(r * 255)  # BGR
-
-
-def _draw_boxes(
-    img_bgr,
-    boxes_xyxy,
-    cls_ids,
-    scores,
-    class_names: Optional[Sequence[str]],
-) -> "object":
-    import cv2
-
-    for (x1, y1, x2, y2), cls_id, score in zip(boxes_xyxy, cls_ids, scores):
-        color = _color_for_class(int(cls_id))
-        x1i, y1i, x2i, y2i = int(x1), int(y1), int(x2), int(y2)
-        cv2.rectangle(img_bgr, (x1i, y1i), (x2i, y2i), color, 2)
-
-        name = _label_from_id(int(cls_id), class_names)
-        text = f"{name} {float(score):.2f}"
-        (tw, th), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        tx1 = max(0, x1i)
-        ty1 = max(0, y1i - th - baseline - 4)
-        cv2.rectangle(img_bgr, (tx1, ty1), (tx1 + tw + 6, ty1 + th + baseline + 6), color, -1)
-        cv2.putText(
-            img_bgr,
-            text,
-            (tx1 + 3, ty1 + th + 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (255, 255, 255),
-            2,
-            lineType=cv2.LINE_AA,
-        )
-
-    return img_bgr
-
-
-def _safe_annotated_name(src: Path) -> str:
-    suffix = src.suffix.lower()
-    if suffix in {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}:
-        return src.name
-    return f"{src.stem}.jpg"
-
-
-def _xyxy_letterbox_to_original(boxes_xyxy, orig_hw: Tuple[int, int], imgsz: Tuple[int, int]) -> "object":
-    import numpy as np
-
-    orig_h, orig_w = orig_hw
-    target_h, target_w = imgsz
-    gain = min(float(target_h) / float(orig_h), float(target_w) / float(orig_w))
-    scaled_w = float(orig_w) * gain
-    scaled_h = float(orig_h) * gain
-    pad_x = (float(target_w) - scaled_w) / 2.0
-    pad_y = (float(target_h) - scaled_h) / 2.0
-
-    boxes = boxes_xyxy.astype(np.float32, copy=True)
-    boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_x) / gain
-    boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_y) / gain
-    boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0.0, float(orig_w))
-    boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0.0, float(orig_h))
-    return boxes
-
-
-def _write_yolo_txt(txt_path: Path, boxes_xyxy, cls_ids, orig_hw: Tuple[int, int], imgsz: Tuple[int, int]) -> None:
-    import numpy as np
-
-    txt_path.parent.mkdir(parents=True, exist_ok=True)
-    orig_h, orig_w = orig_hw
-    if len(cls_ids) == 0:
-        txt_path.write_text("", encoding="utf-8")
-        return
-
-    boxes = _xyxy_letterbox_to_original(boxes_xyxy, orig_hw=orig_hw, imgsz=imgsz)
-    lines: List[str] = []
-    for (x1, y1, x2, y2), cls_id in zip(boxes, cls_ids):
-        x1 = float(np.clip(x1, 0.0, float(orig_w)))
-        y1 = float(np.clip(y1, 0.0, float(orig_h)))
-        x2 = float(np.clip(x2, 0.0, float(orig_w)))
-        y2 = float(np.clip(y2, 0.0, float(orig_h)))
-        bw = max(0.0, x2 - x1)
-        bh = max(0.0, y2 - y1)
-        xc = x1 + bw / 2.0
-        yc = y1 + bh / 2.0
-        if orig_w <= 0 or orig_h <= 0:
-            continue
-        lines.append(
-            f"{int(cls_id)} {xc / float(orig_w):.6f} {yc / float(orig_h):.6f} {bw / float(orig_w):.6f} {bh / float(orig_h):.6f}"
-        )
-    content = "\n".join(lines)
-    if content:
-        content += "\n"
-    txt_path.write_text(content, encoding="utf-8")
-
-
+# _nms_xyxy → moved to webui/yolo_postprocess.py or label_utils.py
 def _category_images_dir(out_dir: Path, label: str, rel_parent: Path) -> Path:
     dest_dir = out_dir / label / "images"
     if rel_parent != Path("."):
@@ -471,26 +319,7 @@ def _load_class_names(model_path: Path, session) -> Optional[List[str]]:
     return _load_class_names_from_sidecar(model_path)
 
 
-def normalize_execution_device(device: str) -> str:
-    requested = (device or "auto").strip().lower()
-    if requested not in {"auto", "cpu"}:
-        raise ValueError(f"不支持的推理设备: {device}")
-    return requested
-
-
-def format_seconds_human(seconds: Optional[float]) -> str:
-    if seconds is None:
-        return "计算中"
-    total = max(0, int(round(float(seconds))))
-    hours, rem = divmod(total, 3600)
-    minutes, secs = divmod(rem, 60)
-    if hours > 0:
-        return f"{hours}h{minutes:02d}m{secs:02d}s"
-    if minutes > 0:
-        return f"{minutes}m{secs:02d}s"
-    return f"{secs}s"
-
-
+# normalize_execution_device → moved to webui/yolo_postprocess.py or label_utils.py
 def configure_cv2_runtime(cv2_module) -> None:
     global _CV2_RUNTIME_CONFIGURED  # noqa: PLW0603
     if _CV2_RUNTIME_CONFIGURED:
@@ -538,12 +367,7 @@ def build_ort_providers(device: str = "auto") -> List[object]:
     ]
 
 
-def _label_from_id(cls_id: int, class_names: Optional[Sequence[str]]) -> str:
-    if class_names and 0 <= cls_id < len(class_names):
-        return str(class_names[cls_id])
-    return str(cls_id)
-
-
+# _label_from_id → moved to webui/yolo_postprocess.py or label_utils.py
 def _infer_top1_for_batch(
     session,
     input_name: str,

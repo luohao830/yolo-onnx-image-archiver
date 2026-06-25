@@ -21,6 +21,7 @@ from backend.api.routes.public_jobs import (
 )
 from backend.schemas.jobs import CreateJobRequest
 import backend.services.job_service as job_service
+import backend.services.job_upload_store as job_upload_store
 from backend.services.job_service import JobService, get_job_service
 from backend.services.runtime_paths import RuntimePaths
 from backend.services.model_service import ModelService
@@ -57,12 +58,12 @@ def test_get_public_job_returns_status_when_token_matches(tmp_path: Path) -> Non
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
     service = JobService(engine)
-    receipt = create_job(CreateJobRequest(mode="advanced"), service=service)
+    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
 
     payload = get_job(receipt.job_code, receipt.access_token, service=service)
 
     assert payload.job_code == receipt.job_code
-    assert payload.mode == "advanced"
+    assert payload.mode == "person_filter"
     assert payload.status == "created"
     assert payload.error_message is None
 
@@ -181,7 +182,7 @@ def test_upload_public_person_filter_rejects_archive_over_upload_limit(
     service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
     receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
     scheduler = _FakeScheduler()
-    monkeypatch.setattr(job_service, "MAX_UPLOAD_FILE_BYTES", 10, raising=False)
+    monkeypatch.setattr(job_upload_store, "MAX_UPLOAD_FILE_BYTES", 10, raising=False)
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("demo.jpg", b"image-bytes")

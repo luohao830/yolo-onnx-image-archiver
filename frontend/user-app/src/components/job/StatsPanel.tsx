@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
-import type { JobDetection, JobStats } from "../../api/client";
+import type { JobDetection, JobStats } from "../../api/types";
+import { formatSeconds } from "../../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { KpiCard } from "./KpiCard";
 
@@ -19,12 +20,6 @@ const LABEL_COLORS = [
   "bg-cyan-600",
   "bg-slate-600",
 ];
-
-function formatSeconds(value?: number): string {
-  if (value === undefined || value === null) return "—";
-  if (value < 1) return `${(value * 1000).toFixed(0)} ms`;
-  return `${value.toFixed(2)} s`;
-}
 
 /** 统计面板：总图数/检测图/无检测图、by_label 分布条、置信度分布、耗时概览。 */
 export function StatsPanel({ summary, detections }: StatsPanelProps) {

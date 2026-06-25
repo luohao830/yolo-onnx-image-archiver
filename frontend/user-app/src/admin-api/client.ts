@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+import type { JobDetection, JobEvent, JobStats, JobStatus } from "../api/types";
+
+export type { JobStats } from "../api/types";
+
 export interface AdminLoginResponse {
   token: string;
 }
@@ -31,7 +35,7 @@ export interface AdminJob {
   id: number;
   job_code: string;
   mode: string;
-  status: string;
+  status: JobStatus;
   progress: number;
   cancel_requested: boolean;
   error_message: string | null;
@@ -39,12 +43,8 @@ export interface AdminJob {
   download_ready: boolean;
 }
 
-export interface AdminJobEvent {
-  id: number;
-  event_type: string;
-  message: string;
-  payload_json: Record<string, unknown>;
-}
+export type AdminJobEvent = JobEvent;
+export type AdminJobDetection = JobDetection;
 
 export interface AdminJobDetail extends AdminJob {
   input_path: string | null;
@@ -53,41 +53,8 @@ export interface AdminJobDetail extends AdminJob {
   summary?: JobStats | null;
 }
 
-/** 任务统计（后端 JobRecord.summary_json）。 */
-export interface JobStats {
-  total?: number;
-  written?: number;
-  by_label?: Record<string, number>;
-  elapsed_sec?: number;
-  inference_sec?: number;
-  preprocess_sec?: number;
-  postprocess_sec?: number;
-  hardlink_sec?: number;
-  draw_sec?: number;
-  drawn?: number;
-  txt_written?: number;
-  hardlinked?: number;
-  copied?: number;
-  failed?: number;
-  used_batch?: number;
-  used_imgsz?: number[] | [number, number];
-  cuda_enabled?: boolean;
-  providers?: string[];
-}
-
-export interface AdminJobDetection {
-  filename: string;
-  rel_path?: string;
-  width: number;
-  height: number;
-  detections: Array<{
-    label: string;
-    confidence: number;
-    bbox: [number, number, number, number];
-    cls_id: number;
-  }>;
-  has_drawn: boolean;
-  drawn_path?: string | null;
+export interface AdminJobEventsTokenResponse {
+  token: string;
 }
 
 export interface AdminJobDetectionsResponse {
@@ -255,6 +222,19 @@ export async function retryAdminJob(jobId: number): Promise<AdminJob> {
   return response.json() as Promise<AdminJob>;
 }
 
+export async function issueAdminJobEventsToken(
+  jobId: number,
+  signal?: AbortSignal,
+): Promise<AdminJobEventsTokenResponse> {
+  const response = await adminFetch(`/admin/jobs/${jobId}/events-token`, { method: "POST", signal });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `issue admin job events token failed: ${response.status}`));
+  }
+
+  return response.json() as Promise<AdminJobEventsTokenResponse>;
+}
+
 export async function downloadAdminJobResult(jobId: number): Promise<void> {
   const response = await adminFetch(`/admin/jobs/${jobId}/download`);
 
@@ -273,37 +253,93 @@ export async function downloadAdminJobResult(jobId: number): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export function buildAdminJobEventsUrl(jobId: number): string {
-  return `${resolveApiBaseUrl()}/admin/jobs/${jobId}/events`;
+export function buildAdminJobEventsUrl(jobId: number, sseToken: string): string {
+  const params = new URLSearchParams({ sse_token: sseToken });
+  return `${resolveApiBaseUrl()}/admin/jobs/${jobId}/events?${params.toString()}`;
 }
 
 export function buildAdminJobImageUrl(jobId: number, relPath: string): string {
   return `${resolveApiBaseUrl()}/admin/jobs/${jobId}/images/${encodePath(relPath)}`;
 }
 
+const SSE_RECONNECT_DELAY_MS = 3000;
+
 /** 订阅管理员任务 SSE 事件；返回取消订阅函数。 */
 export function subscribeAdminJobEvents(
   jobId: number,
   onEvent: (event: AdminJobEvent) => void,
-  onError?: (error: Event) => void,
+  onError?: (error: Event | Error) => void,
 ): () => void {
-  const url = buildAdminJobEventsUrl(jobId);
-  const source = new EventSource(url);
+  let closed = false;
+  let source: EventSource | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let tokenRequest: AbortController | null = null;
 
-  source.onmessage = (messageEvent) => {
-    try {
-      const parsed = JSON.parse(messageEvent.data) as AdminJobEvent;
-      onEvent(parsed);
-    } catch {
-      // 忽略 keepalive 注释与异常帧。
+  const scheduleConnect = (delayMs = 0) => {
+    if (closed) return;
+    if (delayMs > 0) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        void connect();
+      }, delayMs);
+      return;
     }
+    void connect();
   };
 
-  source.onerror = (event) => {
-    onError?.(event);
-  };
+  async function connect() {
+    tokenRequest = new AbortController();
+    try {
+      const { token } = await issueAdminJobEventsToken(jobId, tokenRequest.signal);
+      if (closed) return;
+      source = new EventSource(buildAdminJobEventsUrl(jobId, token));
 
-  return () => source.close();
+      source.onmessage = (messageEvent) => {
+        try {
+          const parsed: unknown = JSON.parse(messageEvent.data);
+          if (isAdminJobEvent(parsed)) onEvent(parsed);
+        } catch {
+          // 忽略 keepalive 注释与异常帧。
+        }
+      };
+
+      source.onerror = (event) => {
+        if (closed) return;
+        onError?.(event);
+        source?.close();
+        source = null;
+        scheduleConnect(SSE_RECONNECT_DELAY_MS);
+      };
+    } catch (error) {
+      if (closed) return;
+      onError?.(error instanceof Error ? error : new Event("error"));
+      scheduleConnect(SSE_RECONNECT_DELAY_MS);
+    } finally {
+      tokenRequest = null;
+    }
+  }
+
+  scheduleConnect();
+
+  return () => {
+    closed = true;
+    tokenRequest?.abort();
+    source?.close();
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+  };
+}
+
+function isAdminJobEvent(value: unknown): value is AdminJobEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.id === "number" &&
+    typeof event.event_type === "string" &&
+    typeof event.message === "string" &&
+    typeof event.payload_json === "object" &&
+    event.payload_json !== null &&
+    !Array.isArray(event.payload_json)
+  );
 }
 
 export async function getAdminJobDetections(

@@ -1,14 +1,12 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 
 import {
   getJobDetections,
-  type JobDetection,
   type JobDetectionsResponse,
-  type JobStats,
-  type JobStatus,
   type PublicJobStatus,
 } from "../api/client";
+import type { JobDetection, JobStats, JobStatus } from "../api/types";
 import { DetectionImageViewer } from "../components/job/DetectionImageViewer";
 import { JobProgressContainer } from "../components/job/JobProgressContainer";
 import { StatsPanel } from "../components/job/StatsPanel";
@@ -34,14 +32,22 @@ export function ResultPage(props: ResultPageProps) {
   const [summary, setSummary] = useState<JobStats | null>(null);
   const [detections, setDetections] = useState<JobDetection[]>([]);
   const [detectionsError, setDetectionsError] = useState<string | null>(null);
-  const [detectionsLoaded, setDetectionsLoaded] = useState(false);
+  const detectionsLoadedRef = useRef(false);
+
+  useEffect(() => {
+    setStatus("created");
+    setSummary(null);
+    setDetections([]);
+    setDetectionsError(null);
+    detectionsLoadedRef.current = false;
+  }, [jobCode, accessToken]);
 
   const handleStatus = useCallback(
     (next: PublicJobStatus) => {
       setStatus(next.status);
       setSummary(next.summary ?? null);
-      if (next.status === "completed" && !detectionsLoaded) {
-        setDetectionsLoaded(true);
+      if (next.status === "completed" && !detectionsLoadedRef.current) {
+        detectionsLoadedRef.current = true;
         try {
           getJobDetections(jobCode, accessToken)
             .then((data: JobDetectionsResponse) => setDetections(data.images ?? []))
@@ -53,7 +59,7 @@ export function ResultPage(props: ResultPageProps) {
         }
       }
     },
-    [jobCode, accessToken, detectionsLoaded],
+    [jobCode, accessToken],
   );
 
   const hasDetections = detections.length > 0;

@@ -108,3 +108,38 @@ def test_build_job_summary_json_excludes_out_dir() -> None:
     assert "out_dir" not in result
     assert result["total"] == 3
     assert result["used_imgsz"] == [640, 640]
+
+
+def test_public_image_rejects_empty_rel_path(tmp_path: Path) -> None:
+    service, job_code, access_token, _job_id, result_dir = _seed_completed_job(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        get_job_image(job_code, access_token, "", service=service)
+    assert exc.value.status_code == 404
+
+
+def test_public_image_rejects_traversal_attempts(tmp_path: Path) -> None:
+    service, job_code, access_token, _job_id, result_dir = _seed_completed_job(tmp_path)
+    for payload in (
+        ".%2e/.%2e/etc/hostname",
+        "....//....//etc/hostname",
+        "foo/../../etc/hostname",
+    ):
+        with pytest.raises(HTTPException) as exc:
+            get_job_image(job_code, access_token, payload, service=service)
+        assert exc.value.status_code == 404
+
+
+def test_public_detections_404_when_result_dir_absent(tmp_path: Path) -> None:
+    """结果目录不存在时返回 404，不应抛内部错误。"""
+    service, job_code, access_token, _job_id, _result_dir = _seed_completed_job(tmp_path)
+    # result_dir 存在但从 db 返回 None — 已由 _seed 保证 result_dir 是空目录
+    with pytest.raises(HTTPException) as exc:
+        get_job_detections(job_code, access_token, service=service)
+    assert exc.value.status_code == 404
+
+
+def test_admin_image_rejects_traversal(tmp_path: Path) -> None:
+    service, _job_code, _access_token, job_id, _result_dir = _seed_completed_job(tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        admin_get_job_image(job_id, "../../../etc/passwd", admin={}, service=service)
+    assert exc.value.status_code == 404

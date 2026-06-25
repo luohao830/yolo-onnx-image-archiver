@@ -7,7 +7,7 @@ from typing import Annotated, Any, AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
-from backend.api.deps import require_admin
+from backend.api.deps import require_admin_sse
 from backend.services.event_bus import EventBus
 from backend.services.job_service import JobService, get_job_service
 
@@ -86,7 +86,7 @@ async def stream_public_job_events(
 async def stream_admin_job_events(
     job_id: int,
     request: Request,
-    admin: Annotated[dict[str, Any], Depends(require_admin)],
+    admin: Annotated[dict[str, Any], Depends(require_admin_sse)],
     service: Annotated[JobService, Depends(get_job_service)],
 ) -> StreamingResponse:
     del admin

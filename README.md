@@ -67,7 +67,7 @@ http://127.0.0.1:58000/
 - `/admin/`：由用户前台静态站点承载的内置管理员后台
 - `/api/...`：后端 API
 
-gateway 默认允许最大 `100g` 请求体，用于人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传到当前任务目录并解压，不做 hash 复用或服务端压缩包缓存。
+gateway 默认允许最大 `100g` 请求体，用于人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传到当前任务目录并解压，不做 hash 复用或服务端压缩包缓存。gateway 访问日志使用不含 query string 的自定义格式，避免 `access_token` 或短期 SSE token 落盘。
 
 常用命令：
 
@@ -156,7 +156,7 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 - `task_slots`：任务并发槽位，范围 `1` 到 `3`
 - `gpu_slots`：GPU 推理槽位，范围 `1` 到 `3`
 
-任务监控页当前支持查看任务列表、查看单个任务详情与关键日志、下载已完成任务输出、取消任务和重试失败任务。
+任务监控页当前支持查看任务列表、查看单个任务详情与关键日志、通过短期 SSE token 订阅实时事件、下载已完成任务输出、取消任务和重试失败任务。
 
 ## API 摘要
 
@@ -184,7 +184,8 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 - `PUT /api/admin/configs/concurrency`
 - `GET /api/admin/jobs`
 - `GET /api/admin/jobs/{job_id}`
-- `GET /api/admin/jobs/{job_id}/events`（SSE 实时事件流）
+- `POST /api/admin/jobs/{job_id}/events-token`（签发短期 SSE token）
+- `GET /api/admin/jobs/{job_id}/events?sse_token=...`（SSE 实时事件流；IP 白名单来源可免 token）
 - `GET /api/admin/jobs/{job_id}/detections`
 - `GET /api/admin/jobs/{job_id}/images/{file_path}`
 - `GET /api/admin/jobs/{job_id}/download`

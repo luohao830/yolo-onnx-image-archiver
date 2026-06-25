@@ -15,11 +15,16 @@ class AdminTokenError(ValueError):
 
 
 class AdminTokenService:
-    def __init__(self, secret_key: str, ttl_seconds: int = 3600) -> None:
+    def __init__(self, secret_key: str, ttl_seconds: int = 3600, sse_ttl_seconds: int = 300) -> None:
         self.ttl_seconds = ttl_seconds
+        self.sse_ttl_seconds = sse_ttl_seconds
         self.serializer = URLSafeTimedSerializer(
             secret_key=secret_key,
             salt="admin-auth",
+        )
+        self.sse_serializer = URLSafeTimedSerializer(
+            secret_key=secret_key,
+            salt="admin-sse-events",
         )
 
     def issue(self) -> str:
@@ -33,8 +38,34 @@ class AdminTokenService:
         except BadSignature as exc:
             raise AdminTokenError("invalid admin token") from exc
 
-        if not isinstance(payload, dict) or payload.get("role") != "admin":
+        if not isinstance(payload, dict) or payload.get("role") != "admin" or payload.get("purpose") is not None:
             raise AdminTokenError("invalid admin token")
+        return dict(payload)
+
+    def issue_sse(self, job_id: int) -> str:
+        return self.sse_serializer.dumps(
+            {
+                "role": "admin",
+                "purpose": "job-events",
+                "job_id": job_id,
+            }
+        )
+
+    def verify_sse(self, token: str, job_id: int) -> dict[str, Any]:
+        try:
+            payload = self.sse_serializer.loads(token, max_age=self.sse_ttl_seconds)
+        except SignatureExpired as exc:
+            raise AdminTokenError("admin sse token expired") from exc
+        except BadSignature as exc:
+            raise AdminTokenError("invalid admin sse token") from exc
+
+        if (
+            not isinstance(payload, dict)
+            or payload.get("role") != "admin"
+            or payload.get("purpose") != "job-events"
+            or payload.get("job_id") != job_id
+        ):
+            raise AdminTokenError("invalid admin sse token")
         return dict(payload)
 
 

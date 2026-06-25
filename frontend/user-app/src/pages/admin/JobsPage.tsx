@@ -1,5 +1,5 @@
 import { RefreshCw, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   cancelAdminJob,
@@ -10,25 +10,33 @@ import {
   subscribeAdminJobEvents,
   type AdminJob,
   type AdminJobDetail,
-  type JobStats,
 } from "../../admin-api/client";
-import { Badge } from "../../components/ui/badge";
+import type { JobStats } from "../../api/types";
+import { KpiCard } from "../../components/job/KpiCard";
+import { LogPanel } from "../../components/job/LogPanel";
+import { StatusBadge } from "../../components/job/StatusBadge";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { EmptyState } from "../../components/ui/empty-state";
 import { FadeIn } from "../../components/ui/fade-in";
-import { KpiCard } from "../../components/job/KpiCard";
-import { LogPanel } from "../../components/job/LogPanel";
 import { Progress } from "../../components/ui/progress";
-import { StatusBadge } from "../../components/job/StatusBadge";
-import type { JobStatus } from "../../api/client";
+import { useJobLiveStatus } from "../../hooks/useJobLiveStatus";
+import { formatSeconds, isTerminalStatus } from "../../lib/utils";
 
 const POLL_INTERVAL_MS = 3000;
 
-function formatSeconds(value?: number): string {
-  if (value === undefined || value === null) return "—";
-  if (value < 1) return `${(value * 1000).toFixed(0)} ms`;
-  return `${value.toFixed(2)} s`;
+function mergeJobSummary(detail: AdminJobDetail): AdminJob {
+  return {
+    id: detail.id,
+    job_code: detail.job_code,
+    mode: detail.mode,
+    status: detail.status,
+    progress: detail.progress,
+    cancel_requested: detail.cancel_requested,
+    error_message: detail.error_message,
+    result_zip_available: detail.result_zip_available,
+    download_ready: detail.download_ready,
+  };
 }
 
 export function JobsPage() {
@@ -44,51 +52,43 @@ export function JobsPage() {
     void loadJobs();
   }, []);
 
-  // 选中任务后定时轮询详情 + SSE 订阅。
+  const selectedJobId = selectedJob?.id ?? null;
+
+  const fetchSelectedJob = useCallback(async () => {
+    if (selectedJobId === null) throw new Error("未选择任务");
+    return getAdminJob(selectedJobId);
+  }, [selectedJobId]);
+
+  const subscribeSelectedJob = useCallback(
+    (onEvent: () => void, onError: (error: Event | Error) => void) => {
+      if (selectedJobId === null) return () => {};
+      return subscribeAdminJobEvents(selectedJobId, onEvent, onError);
+    },
+    [selectedJobId],
+  );
+
+  const isSelectedTerminal = useCallback(
+    (detail: AdminJobDetail) => isTerminalStatus(detail.status),
+    [],
+  );
+
+  const {
+    snapshot: liveSelectedJob,
+    realtimeFailed,
+  } = useJobLiveStatus<AdminJobDetail>({
+    enabled: selectedJobId !== null,
+    fetchSnapshot: fetchSelectedJob,
+    subscribe: subscribeSelectedJob,
+    isTerminal: isSelectedTerminal,
+    pollIntervalMs: POLL_INTERVAL_MS,
+  });
+
   useEffect(() => {
-    if (!selectedJob) return;
-    const jobId = selectedJob.id;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    async function refreshDetail() {
-      try {
-        const detail = await getAdminJob(jobId);
-        if (!stopped) setSelectedJob(detail);
-      } catch {
-        // 忽略瞬时错误，下一轮重试。
-      }
-    }
-
-    let unsubscribe: (() => void) | null = null;
-    try {
-      unsubscribe = subscribeAdminJobEvents(jobId, () => {
-        if (!stopped) void refreshDetail();
-      });
-    } catch {
-      // SSE 不可用时降级轮询。
-    }
-
-    const schedule = () => {
-      timer = setTimeout(() => {
-        void refreshDetail();
-        if (!stopped) schedule();
-      }, POLL_INTERVAL_MS);
-    };
-    if (selectedJob.status !== "completed" && selectedJob.status !== "failed" && selectedJob.status !== "canceled") {
-      schedule();
-    }
-
-    return () => {
-      stopped = true;
-      try {
-        unsubscribe?.();
-      } catch {
-        // ignore
-      }
-      if (timer) clearTimeout(timer);
-    };
-  }, [selectedJob?.id, selectedJob?.status]);
+    if (!liveSelectedJob) return;
+    setSelectedJob(liveSelectedJob);
+    const summary = mergeJobSummary(liveSelectedJob);
+    setJobs((current) => current.map((job) => (job.id === summary.id ? { ...job, ...summary } : job)));
+  }, [liveSelectedJob]);
 
   async function loadJobs() {
     if (isRefreshing) return;
@@ -125,7 +125,9 @@ export function JobsPage() {
 
   async function handleShowDetail(jobId: number) {
     try {
-      setSelectedJob(await getAdminJob(jobId));
+      const detail = await getAdminJob(jobId);
+      setSelectedJob(detail);
+      setJobs((current) => current.map((job) => (job.id === detail.id ? { ...job, ...mergeJobSummary(detail) } : job)));
       setErrorMessage(null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "加载任务详情失败");
@@ -225,7 +227,7 @@ export function JobsPage() {
                     {job.cancel_requested ? <span className="text-xs text-amber-600">已请求取消</span> : null}
                   </div>
                   <span className="text-sm text-muted">{job.mode}</span>
-                  <StatusBadge status={job.status as JobStatus} />
+                  <StatusBadge status={job.status} />
                   <span className="text-sm font-bold text-ink">{job.progress}%</span>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="ghost" size="sm" onClick={() => void handleShowDetail(job.id)}>详情</Button>
@@ -250,12 +252,13 @@ export function JobsPage() {
                 <div className="space-y-1">
                   <p className="text-xs font-bold uppercase tracking-wide text-brand">任务详情</p>
                   <h2 className="text-lg font-bold text-ink">{selectedJob.job_code}</h2>
+                  {realtimeFailed ? <p className="text-xs text-amber-600">实时推送中断，已降级轮询。</p> : null}
                 </div>
                 <dl className="grid grid-cols-2 gap-2 text-sm">
                   <dt className="text-subtle">模式</dt>
                   <dd className="text-ink">{selectedJob.mode}</dd>
                   <dt className="text-subtle">状态</dt>
-                  <dd><StatusBadge status={selectedJob.status as JobStatus} /></dd>
+                  <dd><StatusBadge status={selectedJob.status} /></dd>
                   <dt className="text-subtle">进度</dt>
                   <dd className="text-ink">{selectedJob.progress}%</dd>
                   <dt className="text-subtle col-span-2">输入</dt>
