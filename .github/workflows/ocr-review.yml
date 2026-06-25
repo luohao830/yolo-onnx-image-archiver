@@ -71,7 +71,7 @@ jobs:
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: 安装 OpenCodeReview
         run: |
@@ -80,11 +80,20 @@ jobs:
           ocr version || true
 
       - name: 配置 OCR
+        env:
+          OCR_LLM_URL: ${{ secrets.OCR_LLM_URL }}
+          OCR_LLM_AUTH_TOKEN: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          OCR_LLM_MODEL: ${{ secrets.OCR_LLM_MODEL }}
+          OCR_LLM_USE_ANTHROPIC: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
         run: |
-          ocr config set llm.url ${{ secrets.OCR_LLM_URL }}
-          ocr config set llm.auth_token ${{ secrets.OCR_LLM_AUTH_TOKEN }}
-          ocr config set llm.model ${{ secrets.OCR_LLM_MODEL }}
-          ocr config set llm.use_anthropic ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
+          ocr config set llm.url "${OCR_LLM_URL}"
+          ocr config set llm.auth_token "${OCR_LLM_AUTH_TOKEN}"
+          if [ -n "${OCR_LLM_MODEL}" ]; then
+            ocr config set llm.model "${OCR_LLM_MODEL}"
+          fi
+          if [ -n "${OCR_LLM_USE_ANTHROPIC}" ]; then
+            ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC}"
+          fi
           ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
 
       - name: 运行 OpenCodeReview
