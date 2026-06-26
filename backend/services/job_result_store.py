@@ -6,6 +6,12 @@ from typing import Any
 from backend.services import inference_adapter
 from backend.services.job_presenter import JobPresenter
 
+ALLOWED_IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp"})
+IMAGE_RESPONSE_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+}
+
 
 class JobResultStore:
     """统一结果 zip / detections / 图片的安全路径解析与读取。
@@ -29,5 +35,8 @@ class JobResultStore:
 
     @classmethod
     def resolve_image(cls, result_dir: Path, rel_path: str) -> Path | None:
-        """安全解析 result_dir 下的相对图片路径。"""
-        return JobPresenter.safe_resolve_within(result_dir, rel_path)
+        """安全解析 result_dir 下的相对图片路径，并限制为图片后缀白名单。"""
+        resolved = JobPresenter.safe_resolve_within(result_dir, rel_path)
+        if resolved is None or resolved.suffix.lower() not in ALLOWED_IMAGE_SUFFIXES:
+            return None
+        return resolved

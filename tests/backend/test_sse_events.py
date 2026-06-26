@@ -4,10 +4,12 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from backend.api.routes.public_events import _stream_events
+from backend.api.routes.public_events import _stream_events, stream_public_job_events
 from backend.core.db import build_engine, create_all, session_scope
+from backend.core.job_events_auth import JobEventsTokenService
 from backend.db.models import ModelRecord
 from backend.main import app
+from starlette.requests import Request
 from backend.repositories.jobs import JobRepository
 from backend.services.event_bus import EventBus, get_event_bus
 from backend.services.job_service import JobService, get_job_service
@@ -86,6 +88,45 @@ def test_stream_events_streams_published_event(tmp_path: Path) -> None:
 
     chunk = asyncio.run(scenario())
     assert b"completed" in chunk
+
+
+
+def test_stream_public_job_events_requires_short_lived_token(tmp_path: Path) -> None:
+    service, job_code, _access_token, job_id = _seed(tmp_path)
+    token_service = JobEventsTokenService("test-secret")
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/jobs/JOB/events",
+            "headers": [],
+            "app": app,
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+
+    with pytest.raises(HTTPException) as missing_token:
+        asyncio.run(
+            stream_public_job_events(
+                job_code,
+                request,
+                service=service,
+                token_service=token_service,
+                events_token=None,
+            )
+        )
+    assert missing_token.value.status_code == 401
+
+    response = asyncio.run(
+        stream_public_job_events(
+            job_code,
+            request,
+            service=service,
+            token_service=token_service,
+            events_token=token_service.issue(job_id),
+        )
+    )
+    assert response.media_type == "text/event-stream"
 
 
 def test_get_public_job_status_includes_summary_field(tmp_path: Path) -> None:

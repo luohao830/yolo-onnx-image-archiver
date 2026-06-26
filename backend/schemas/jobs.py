@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateJobRequest(BaseModel):
@@ -22,7 +22,7 @@ class PublicJobStatus(BaseModel):
     mode: str
     status: str
     progress: int
-    events: list["JobEvent"] = []
+    events: list["JobEvent"] = Field(default_factory=list)
     error_message: str | None = None
     download_ready: bool = False
     summary: dict[str, Any] | None = None
@@ -33,11 +33,46 @@ class PublishedModel(BaseModel):
     name: str
 
 
+class PublicJobEventsTokenRequest(BaseModel):
+    access_token: str
+
+
+class JobEventsTokenResponse(BaseModel):
+    token: str
+
+
+class DetectionBox(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    label: str
+    confidence: float
+    bbox: list[float]
+    cls_id: int
+
+
+class DetectionImage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    filename: str
+    rel_path: str | None = None
+    width: int = 0
+    height: int = 0
+    detections: list[DetectionBox] = Field(default_factory=list)
+    has_drawn: bool = False
+    drawn_path: str | None = None
+
+
+class JobDetectionsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    images: list[DetectionImage] = Field(default_factory=list)
+
+
 class JobEvent(BaseModel):
     id: int
     event_type: str
     message: str
-    payload_json: dict[str, Any] = {}
+    payload_json: dict[str, Any] = Field(default_factory=dict)
 
 
 class AdminJobDetail(BaseModel):
@@ -52,5 +87,5 @@ class AdminJobDetail(BaseModel):
     result_dir: str | None = None
     result_zip_available: bool = False
     download_ready: bool = False
-    events: list[JobEvent] = []
+    events: list[JobEvent] = Field(default_factory=list)
     summary: dict[str, Any] | None = None

@@ -4,10 +4,15 @@ import asyncio
 import json
 from typing import Annotated, Any, AsyncIterator
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from backend.api.deps import require_admin_sse
+from backend.core.job_events_auth import (
+    JobEventsTokenError,
+    JobEventsTokenService,
+    get_job_events_token_service,
+)
 from backend.services.event_bus import EventBus
 from backend.services.job_presenter import JobPresenter
 from backend.services.job_service import JobService, get_job_service
@@ -90,19 +95,25 @@ def _filter_event_for_public(event: dict[str, Any]) -> dict[str, Any]:
 @router.get("/jobs/{job_code}/events")
 async def stream_public_job_events(
     job_code: str,
-    access_token: str,
     request: Request,
     service: Annotated[JobService, Depends(get_job_service)],
+    token_service: Annotated[JobEventsTokenService, Depends(get_job_events_token_service)],
+    events_token: Annotated[str | None, Query(include_in_schema=False)] = None,
 ) -> StreamingResponse:
-    job = service.get_public_job(job_code, access_token)
+    if not events_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="job events token required")
+
+    try:
+        claims = token_service.verify(events_token)
+    except JobEventsTokenError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    job_id = claims["job_id"]
+    job = service.get_public_job_event_snapshot(job_id, job_code)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
 
     events = job.get("events", [])
-    job_id = job.get("id")
-    if job_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
-
     bus = _event_bus_from_request(request)
     return StreamingResponse(
         _stream_events(topic=f"job:{job_id}", history=events, bus=bus, request=request, filter_public=True),

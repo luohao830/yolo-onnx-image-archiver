@@ -37,11 +37,37 @@ def normalize_job_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     normalized = dict(DEFAULT_JOB_PAYLOAD)
     if payload:
         normalized.update(dict(payload))
-    if normalized["allowed_class_ids"] is not None:
-        normalized["allowed_class_ids"] = list(normalized["allowed_class_ids"])
-    if normalized["force_class_names"] is not None:
-        normalized["force_class_names"] = list(normalized["force_class_names"])
+    normalized["allowed_class_ids"] = _normalize_allowed_class_ids(normalized["allowed_class_ids"])
+    normalized["force_class_names"] = _normalize_force_class_names(normalized["force_class_names"])
     return normalized
+
+
+def _normalize_allowed_class_ids(value: Any) -> list[int] | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set)):
+        raise ValueError("allowed_class_ids must be a list of non-negative integers")
+
+    class_ids: list[int] = []
+    for item in value:
+        if not isinstance(item, int) or isinstance(item, bool) or item < 0:
+            raise ValueError("allowed_class_ids must be a list of non-negative integers")
+        class_ids.append(item)
+    return class_ids
+
+
+def _normalize_force_class_names(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("force_class_names must be a list of strings")
+
+    class_names: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("force_class_names must be a list of strings")
+        class_names.append(item)
+    return class_names
 
 
 def validate_job_payload(payload: dict[str, Any]) -> None:
@@ -143,6 +169,8 @@ class AdvancedModeHandler:
         if model_id is None:
             raise ValueError("advanced job has no model bound")
         model = ModelRepository(session).get(model_id)
+        if model is None:
+            raise LookupError(f"model not found: {model_id}")
         if not model.enabled:
             raise ValueError("model is not enabled")
         return model_id

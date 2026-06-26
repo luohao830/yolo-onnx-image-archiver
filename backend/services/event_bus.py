@@ -56,8 +56,7 @@ class EventBus:
                 logger.warning("event bus loop closed, dropping event for topic=%s", topic)
                 self.unsubscribe(topic, subscriber.queue)
 
-    @staticmethod
-    def _put_nowait(topic: str, subscriber: _Subscriber, event: Any) -> None:
+    def _put_nowait(self, topic: str, subscriber: _Subscriber, event: Any) -> None:
         if not subscriber.active:
             return
         try:
@@ -68,8 +67,8 @@ class EventBus:
                 subscriber.queue.maxsize,
                 topic,
             )
-            # 消费者已无法跟上，标记为不活跃避免后续空转投递。
-            subscriber.active = False
+            # 消费者已无法跟上，立即从订阅表移除，避免后续无效遍历。
+            self.unsubscribe(topic, subscriber.queue)
 
 
 # 全局单例（在 main.py 中也可挂到 app.state，这里提供惰性获取入口）。

@@ -101,6 +101,17 @@ class JobService:
                 return None
             return job.id
 
+    def get_public_job_event_snapshot(self, job_id: int, job_code: str) -> dict[str, Any] | None:
+        with session_scope(self.engine) as session:
+            repo = JobRepository(session)
+            try:
+                job = repo.get(job_id)
+            except LookupError:
+                return None
+            if job.job_code != job_code:
+                return None
+            return JobPresenter.serialize_public_job(job, repo.list_events(job.id))
+
     def accept_public_job_upload(
         self,
         job_code: str,
@@ -195,13 +206,13 @@ class JobService:
         result_dir = self._resolve_public_result_dir(job_code, access_token)
         if result_dir is None:
             return None
-        return JobPresenter.safe_resolve_within(result_dir, rel_path)
+        return JobResultStore.resolve_image(result_dir, rel_path)
 
     def resolve_admin_result_image(self, job_id: int, rel_path: str) -> Path | None:
         result_dir = self._resolve_admin_result_dir(job_id)
         if result_dir is None:
             return None
-        return JobPresenter.safe_resolve_within(result_dir, rel_path)
+        return JobResultStore.resolve_image(result_dir, rel_path)
 
     def cancel_job(self, job_id: int) -> dict[str, Any]:
         with session_scope(self.engine) as session:

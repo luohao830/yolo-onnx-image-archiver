@@ -9,6 +9,7 @@ vi.mock("../../api/client", () => ({
   buildJobDownloadUrl: vi.fn(() => "/api/jobs/JOB-200/download?access_token=token-200"),
   getJobStatus: vi.fn(),
   getJobDetections: vi.fn(),
+  issueJobEventsToken: vi.fn(() => Promise.resolve("events-token")),
   subscribeJobEvents: vi.fn(() => () => {}),
   buildJobImageUrl: vi.fn(),
   buildJobEventsUrl: vi.fn()

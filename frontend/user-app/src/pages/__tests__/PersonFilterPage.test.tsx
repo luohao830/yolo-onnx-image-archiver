@@ -14,6 +14,8 @@ vi.mock("../../api/client", () => ({
   buildJobDownloadUrl: vi.fn(() => "/api/jobs/JOB-123456/download?access_token=token-123"),
   createJob: vi.fn(),
   getJobStatus: vi.fn(),
+  issueJobEventsToken: vi.fn(() => Promise.resolve("events-token")),
+  subscribeJobEvents: vi.fn(() => () => {}),
   uploadJobFile: vi.fn()
 }));
 
