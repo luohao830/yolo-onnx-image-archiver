@@ -5,13 +5,15 @@ import pytest
 from fastapi import HTTPException
 
 from backend.core.db import build_engine, create_all, session_scope
+from backend.core.job_events_auth import JobEventsTokenService
 from backend.db.models import ModelRecord
 from backend.repositories.jobs import JobRepository
 from backend.services import inference_adapter
 from backend.services.job_service import JobService
+from backend.schemas.jobs import PublicJobEventsTokenRequest
 from backend.services.runtime_paths import RuntimePaths
 
-from backend.api.routes.public_jobs import get_job_detections, get_job_image
+from backend.api.routes.public_jobs import get_job_detections, get_job_image, issue_job_events_token
 from backend.api.routes.admin_jobs import get_job_detections as admin_get_job_detections
 from backend.api.routes.admin_jobs import get_job_image as admin_get_job_image
 
@@ -51,8 +53,8 @@ def test_public_detections_returns_json(tmp_path: Path) -> None:
     )
 
     data = get_job_detections(job_code, access_token, service=service)
-    assert data["images"][0]["filename"] == "a.jpg"
-    assert data["images"][0]["detections"][0]["label"] == "person"
+    assert data.images[0].filename == "a.jpg"
+    assert data.images[0].detections[0].label == "person"
 
 
 def test_public_detections_404_when_missing(tmp_path: Path) -> None:
@@ -70,6 +72,32 @@ def test_public_detections_404_for_bad_token(tmp_path: Path) -> None:
     assert exc.value.status_code == 404
 
 
+
+def test_public_can_issue_short_lived_job_events_token(tmp_path: Path) -> None:
+    service, job_code, access_token, job_id, _result_dir = _seed_completed_job(tmp_path)
+    token_service = JobEventsTokenService("test-secret")
+
+    response = issue_job_events_token(
+        job_code,
+        PublicJobEventsTokenRequest(access_token=access_token),
+        service=service,
+        token_service=token_service,
+    )
+
+    claims = token_service.verify(response.token, job_id)
+    assert claims["purpose"] == "public-job-events"
+    assert claims["job_id"] == job_id
+
+    with pytest.raises(HTTPException) as bad_token_exc:
+        issue_job_events_token(
+            job_code,
+            PublicJobEventsTokenRequest(access_token="bad-token"),
+            service=service,
+            token_service=token_service,
+        )
+    assert bad_token_exc.value.status_code == 404
+
+
 def test_public_image_serves_file_with_traversal_guard(tmp_path: Path) -> None:
     service, job_code, access_token, _job_id, result_dir = _seed_completed_job(tmp_path)
     img_path = result_dir / "person_画框" / "images" / "a.jpg"
@@ -79,6 +107,8 @@ def test_public_image_serves_file_with_traversal_guard(tmp_path: Path) -> None:
     rel = "person_画框/images/a.jpg"
     response = get_job_image(job_code, access_token, rel, service=service)
     assert Path(response.path) == img_path
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "no-store"
 
     with pytest.raises(HTTPException) as exc:
         get_job_image(job_code, access_token, "../../../etc/passwd", service=service)
@@ -90,12 +120,14 @@ def test_admin_detections_and_image(tmp_path: Path) -> None:
     inference_adapter.write_detections_json(result_dir, [{"filename": "b.jpg", "detections": []}])
 
     data = admin_get_job_detections(job_id, admin={}, service=service)
-    assert data["images"][0]["filename"] == "b.jpg"
+    assert data.images[0].filename == "b.jpg"
 
     img_path = result_dir / "c.png"
     img_path.write_bytes(b"png-bytes")
     response = admin_get_job_image(job_id, "c.png", admin={}, service=service)
     assert Path(response.path) == img_path
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_read_detections_json_returns_none_when_absent(tmp_path: Path) -> None:
@@ -115,6 +147,21 @@ def test_public_image_rejects_empty_rel_path(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as exc:
         get_job_image(job_code, access_token, "", service=service)
     assert exc.value.status_code == 404
+
+
+
+def test_public_and_admin_image_reject_non_image_files(tmp_path: Path) -> None:
+    service, job_code, access_token, job_id, result_dir = _seed_completed_job(tmp_path)
+    secret = result_dir / "_detections.json"
+    secret.write_text('{"internal": true}', encoding="utf-8")
+
+    with pytest.raises(HTTPException) as public_exc:
+        get_job_image(job_code, access_token, "_detections.json", service=service)
+    assert public_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException) as admin_exc:
+        admin_get_job_image(job_id, "_detections.json", admin={}, service=service)
+    assert admin_exc.value.status_code == 404
 
 
 def test_public_image_rejects_traversal_attempts(tmp_path: Path) -> None:

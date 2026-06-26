@@ -92,7 +92,7 @@ def test_event_bus_skips_delivery_after_unsubscribe_before_loop_runs() -> None:
     asyncio.run(scenario())
 
 
-def test_event_bus_drops_when_queue_full() -> None:
+def test_event_bus_removes_subscriber_when_queue_full() -> None:
     bus = EventBus()
 
     async def scenario() -> None:
@@ -100,9 +100,11 @@ def test_event_bus_drops_when_queue_full() -> None:
         # 填满队列（maxsize=256）。
         for i in range(256):
             bus.publish("job:4", {"i": i})
-        # 再发一条应被丢弃，不抛错。
+        # 再发一条应移除慢消费者，不抛错。
         bus.publish("job:4", {"i": 256})
-        # 取出几条确认仍可消费。
+        await asyncio.sleep(0)
+        assert "job:4" not in bus._subscribers  # noqa: SLF001
+        # 已经排队的数据仍可由持有 queue 的消费方读出。
         first = await asyncio.wait_for(queue.get(), timeout=1.0)
         assert first == {"i": 0}
 

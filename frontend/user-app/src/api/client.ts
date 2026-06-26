@@ -143,9 +143,29 @@ export function buildJobDownloadUrl(jobCode: string, accessToken: string): strin
   return `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/download?${searchParams.toString()}`;
 }
 
-export function buildJobEventsUrl(jobCode: string, accessToken: string): string {
+export async function issueJobEventsToken(jobCode: string, accessToken: string): Promise<string> {
+  const response = await fetch(`${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/events-token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ access_token: accessToken })
+  });
+
+  if (!response.ok) {
+    throw new Error(await readErrorMessage(response, `issue events token failed: ${response.status}`));
+  }
+
+  const payload = await response.json() as { token?: string };
+  if (!payload.token) {
+    throw new Error("issue events token failed: empty token");
+  }
+  return payload.token;
+}
+
+export function buildJobEventsUrl(jobCode: string, eventsToken: string): string {
   const searchParams = new URLSearchParams({
-    access_token: accessToken
+    events_token: eventsToken
   });
 
   return `${resolveApiBaseUrl()}/jobs/${encodeURIComponent(jobCode)}/events?${searchParams.toString()}`;
@@ -162,11 +182,11 @@ export function buildJobImageUrl(jobCode: string, accessToken: string, relPath: 
 /** 订阅任务 SSE 事件；返回取消订阅函数。失败时回调 onError 以便降级轮询。 */
 export function subscribeJobEvents(
   jobCode: string,
-  accessToken: string,
+  eventsToken: string,
   onEvent: (event: JobEvent) => void,
   onError?: (error: Event) => void
 ): () => void {
-  const url = buildJobEventsUrl(jobCode, accessToken);
+  const url = buildJobEventsUrl(jobCode, eventsToken);
   const source = new EventSource(url);
 
   source.onmessage = (messageEvent) => {

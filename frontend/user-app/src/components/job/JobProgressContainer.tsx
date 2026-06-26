@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   buildJobDownloadUrl,
   getJobStatus,
+  issueJobEventsToken,
   subscribeJobEvents,
   type PublicJobStatus,
 } from "../../api/client";
@@ -54,7 +55,23 @@ export function JobProgressContainer({
   const subscribe = useCallback(
     (onEvent: () => void, onError: (error: Event | Error) => void) => {
       if (!normalizedJobCode || !normalizedAccessToken) return () => {};
-      return subscribeJobEvents(normalizedJobCode, normalizedAccessToken, onEvent, onError);
+
+      let sourceUnsubscribe: (() => void) | null = null;
+      let canceled = false;
+
+      void issueJobEventsToken(normalizedJobCode, normalizedAccessToken)
+        .then((eventsToken) => {
+          if (canceled) return;
+          sourceUnsubscribe = subscribeJobEvents(normalizedJobCode, eventsToken, onEvent, onError);
+        })
+        .catch((error) => {
+          if (!canceled) onError(error instanceof Error ? error : new Error("订阅实时事件失败"));
+        });
+
+      return () => {
+        canceled = true;
+        sourceUnsubscribe?.();
+      };
     },
     [normalizedJobCode, normalizedAccessToken],
   );

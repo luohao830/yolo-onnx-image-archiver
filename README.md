@@ -166,7 +166,8 @@ Docker 后端同时设置了 `MODELS_DIR=/data/models` 供旧版推理链路和�
 - `POST /api/jobs`（支持 `mode`、`model_id`、`payload`，高级模式可传 conf/iou/batch/imgsz/draw_boxes/save_txt 等）
 - `POST /api/jobs/{job_code}/upload?access_token=...`
 - `GET /api/jobs/{job_code}?access_token=...`（含 `summary` 统计字段）
-- `GET /api/jobs/{job_code}/events?access_token=...`（SSE 实时事件流）
+- `POST /api/jobs/{job_code}/events-token`（使用 `access_token` 签发短期 SSE token）
+- `GET /api/jobs/{job_code}/events?events_token=...`（SSE 实时事件流）
 - `GET /api/jobs/{job_code}/detections?access_token=...`（逐图检测结果）
 - `GET /api/jobs/{job_code}/images/{file_path}?access_token=...`（结果图片，含路径遍历防护）
 - `GET /api/jobs/{job_code}/download?access_token=...`
@@ -220,5 +221,5 @@ cd frontend/user-app && npm run build
 - 当前 Compose 不再启动 MongoDB，也不使用 `fo_data/`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如部署环境需要固定 GPU，请在 `backend.deploy.resources.reservations.devices` 中配置 `device_ids`。
 - 公开前台的人员筛选模式可上传图片或 `.zip` 压缩包，后端会解压支持的图片、绑定已发布的默认人员模型并入队执行；`.zip` 每次都会重新上传并解压到当前任务目录；高级模式已支持自定义 `model_id` 与 `payload` 参数并上传文件入队。
-- SSE 实时事件推送基于进程内内存事件总线，仅适用于单 worker Uvicorn 部署；多 worker 需引入 Redis pub/sub（本次未实现）。前端在 SSE 不可用时自动降级为轮询。
+- SSE 实时事件推送基于进程内内存事件总线，仅适用于单 worker Uvicorn 部署；多 worker 需引入 Redis pub/sub（本次未实现）。公开端和管理员端均先签发短期 SSE token 再订阅事件，前端在 SSE 不可用时自动降级为轮询。
 - 任务完成后会落盘 `summary_json` 统计（by_label/耗时/批次/设备等）与逐图检测结果 `_detections.json`，并随结果压缩包打包。

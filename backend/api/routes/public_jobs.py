@@ -5,7 +5,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
-from backend.schemas.jobs import CreateJobRequest, JobReceipt, PublicJobStatus, PublishedModel
+from backend.core.job_events_auth import JobEventsTokenService, get_job_events_token_service
+from backend.schemas.jobs import (
+    CreateJobRequest,
+    JobDetectionsResponse,
+    JobEventsTokenResponse,
+    JobReceipt,
+    PublicJobEventsTokenRequest,
+    PublicJobStatus,
+    PublishedModel,
+)
+from backend.services.job_result_store import IMAGE_RESPONSE_HEADERS
 from backend.services.job_service import JobService, UploadTooLargeError, get_job_service
 from backend.services.model_service import ModelService, get_model_service
 from backend.services.scheduler_service import get_job_scheduler
@@ -104,16 +114,29 @@ def download_job_result(
     )
 
 
-@router.get("/{job_code}/detections")
+@router.get("/{job_code}/detections", response_model=JobDetectionsResponse)
 def get_job_detections(
     job_code: str,
     access_token: str,
     service: Annotated[JobService, Depends(get_job_service)],
-) -> dict:
+) -> JobDetectionsResponse:
     detections = service.get_public_detections(job_code, access_token)
     if detections is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detections not found")
-    return detections
+    return JobDetectionsResponse(**detections)
+
+
+@router.post("/{job_code}/events-token", response_model=JobEventsTokenResponse)
+def issue_job_events_token(
+    job_code: str,
+    payload: PublicJobEventsTokenRequest,
+    service: Annotated[JobService, Depends(get_job_service)],
+    token_service: Annotated[JobEventsTokenService, Depends(get_job_events_token_service)],
+) -> JobEventsTokenResponse:
+    job_id = service.get_public_job_id(job_code, payload.access_token)
+    if job_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+    return JobEventsTokenResponse(token=token_service.issue(job_id))
 
 
 @router.get("/{job_code}/images/{file_path:path}")
@@ -126,4 +149,4 @@ def get_job_image(
     resolved = service.resolve_public_result_image(job_code, access_token, file_path)
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image not found")
-    return FileResponse(path=resolved)
+    return FileResponse(path=resolved, headers=IMAGE_RESPONSE_HEADERS)

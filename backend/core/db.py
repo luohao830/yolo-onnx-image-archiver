@@ -40,12 +40,21 @@ def _ensure_legacy_columns(engine: Engine) -> None:
         try:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE jobs ADD COLUMN summary_json JSON"))
-        except (exc.OperationalError, exc.ProgrammingError):
+        except (exc.OperationalError, exc.ProgrammingError) as err:
             # 并发启动时另一个 worker 可能已添加该列（SQLite 报 "duplicate column"）。
-            pass
+            if _is_duplicate_column_error(err):
+                pass
+            else:
+                logger.exception("Failed to add summary_json column")
+                raise
         except Exception:
             logger.exception("Failed to add summary_json column")
             raise
+
+
+def _is_duplicate_column_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return "duplicate column" in message or "already exists" in message
 
 
 @contextmanager

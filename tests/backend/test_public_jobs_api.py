@@ -305,6 +305,8 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "/api/jobs/{job_code}/detections" in schema["paths"]
     assert "/api/jobs/{job_code}/images/{file_path}" in schema["paths"]
     assert "/api/jobs/{job_code}/events" in schema["paths"]
+    assert "/api/jobs/{job_code}/events-token" in schema["paths"]
+    assert "post" in schema["paths"]["/api/jobs/{job_code}/events-token"]
 
 
 def test_list_published_models_only_returns_enabled_advanced_models(tmp_path: Path) -> None:
@@ -431,6 +433,37 @@ def test_create_advanced_job_with_model_and_payload(tmp_path: Path) -> None:
         assert saved.payload_json["batch"] == 16
 
 
+def test_create_advanced_job_rejects_invalid_class_filters(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="adv-model",
+                slug="adv-model",
+                onnx_path="models/adv.onnx",
+                model_kind="object_detector",
+                enabled=True,
+                visible_in_advanced_mode=True,
+            )
+        )
+
+    invalid_payloads = [
+        {"allowed_class_ids": "0"},
+        {"allowed_class_ids": [0, -1]},
+        {"allowed_class_ids": [0, "person"]},
+        {"force_class_names": "person"},
+        {"force_class_names": ["person", 1]},
+    ]
+    for payload in invalid_payloads:
+        with pytest.raises(HTTPException) as exc:
+            create_job(CreateJobRequest(mode="advanced", model_id=1, payload=payload), service=service)
+        assert exc.value.status_code == 400
+
+
+
 def test_create_advanced_job_rejects_non_visible_model(tmp_path: Path) -> None:
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
@@ -451,6 +484,48 @@ def test_create_advanced_job_rejects_non_visible_model(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as exc:
         create_job(CreateJobRequest(mode="advanced", model_id=1), service=service)
     assert exc.value.status_code == 400
+
+
+def test_upload_advanced_job_returns_404_when_bound_model_missing(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
+    scheduler = _FakeScheduler()
+
+    with session_scope(engine) as session:
+        model = ModelRecord(
+            name="adv-model",
+            slug="adv-model",
+            onnx_path="models/adv.onnx",
+            model_kind="object_detector",
+            enabled=True,
+            visible_in_advanced_mode=True,
+        )
+        session.add(model)
+
+    receipt = create_job(CreateJobRequest(mode="advanced", model_id=1), service=service)
+
+    with session_scope(engine) as session:
+        model = session.get(ModelRecord, 1)
+        assert model is not None
+        session.delete(model)
+
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("demo.jpg", b"image-bytes")
+    archive.seek(0)
+
+    with pytest.raises(HTTPException) as exc:
+        upload_job_file(
+            receipt.job_code,
+            receipt.access_token,
+            file=UploadFile(file=archive, filename="images.zip"),
+            service=service,
+            scheduler=scheduler,
+        )
+    assert exc.value.status_code == 404
+    assert scheduler.submitted == []
+
 
 
 def test_upload_advanced_job_binds_payload_model(tmp_path: Path) -> None:

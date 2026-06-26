@@ -8,7 +8,8 @@ from pydantic import BaseModel
 
 from backend.api.deps import require_admin
 from backend.core.admin_auth import AdminTokenService, get_admin_token_service
-from backend.schemas.jobs import AdminJobDetail
+from backend.schemas.jobs import AdminJobDetail, JobDetectionsResponse
+from backend.services.job_result_store import IMAGE_RESPONSE_HEADERS
 from backend.services.job_service import JobService, get_job_service
 
 
@@ -122,12 +123,12 @@ def download_job_result(
     )
 
 
-@router.get("/{job_id}/detections")
+@router.get("/{job_id}/detections", response_model=JobDetectionsResponse)
 def get_job_detections(
     job_id: int,
     admin: Annotated[dict[str, Any], Depends(require_admin)],
     service: Annotated[JobService, Depends(get_job_service)],
-) -> dict:
+) -> JobDetectionsResponse:
     del admin
     try:
         detections = service.get_admin_detections(job_id)
@@ -135,7 +136,7 @@ def get_job_detections(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if detections is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detections not found")
-    return detections
+    return JobDetectionsResponse(**detections)
 
 
 @router.get("/{job_id}/images/{file_path:path}")
@@ -152,4 +153,4 @@ def get_job_image(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if resolved is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image not found")
-    return FileResponse(path=resolved)
+    return FileResponse(path=resolved, headers=IMAGE_RESPONSE_HEADERS)

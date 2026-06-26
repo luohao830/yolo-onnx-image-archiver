@@ -7,9 +7,13 @@ import { AdvancedModePage } from "../AdvancedModePage";
 
 vi.mock("../../api/client", () => ({
   buildJobDownloadUrl: vi.fn(),
+  createAdvancedJob: vi.fn(),
   createJob: vi.fn(),
   getJobStatus: vi.fn(),
-  listPublishedModels: vi.fn()
+  issueJobEventsToken: vi.fn(() => Promise.resolve("events-token")),
+  listPublishedModels: vi.fn(),
+  subscribeJobEvents: vi.fn(() => () => {}),
+  uploadJobFile: vi.fn()
 }));
 
 describe("AdvancedModePage", () => {
