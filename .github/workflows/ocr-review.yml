@@ -128,7 +128,7 @@ jobs:
           ocr review \
             --from "origin/${BASE_REF}" \
             --to "${HEAD_SHA}" \
-            --background "PR Title: ${PR_TITLE}" \
+            --background "PR Title: ${PR_TITLE}. 请使用中文撰写所有审查评论、建议和汇总结论。" \
             --format json \
             ${RULE_FLAG} \
             > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
