@@ -15,3 +15,5 @@ app.include_router(admin_jobs_router, prefix="/api")
 app.include_router(admin_models_router, prefix="/api")
 app.include_router(admin_configs_router, prefix="/api")
 app.include_router(public_jobs_router, prefix="/api")
+
+# 中文审查测试
