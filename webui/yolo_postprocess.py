@@ -4,6 +4,8 @@ from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from webui.label_utils import sanitize_label
+
 
 def _nms_xyxy(boxes: "np.ndarray", scores: "np.ndarray", iou_thres: float) -> List[int]:
     x1 = boxes[:, 0]
@@ -110,8 +112,6 @@ def _draw_boxes(
 
 
 def _get_label(cls_id: int, class_names: Optional[Sequence[str]]) -> str:
-    from webui.label_utils import sanitize_label
-
     if class_names is not None and 0 <= cls_id < len(class_names):
         raw = class_names[cls_id]
         return sanitize_label(raw.strip()) if raw.strip() else str(cls_id)

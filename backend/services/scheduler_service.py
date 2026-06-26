@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 
 from sqlalchemy.engine import Engine
+
+logger = logging.getLogger(__name__)
 
 from backend.core.config import settings
 from backend.core.db import session_scope
@@ -37,7 +40,7 @@ class DatabaseProgressRecorder:
                 try:
                     self._event_bus.publish(f"job:{job_id}", payload)
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.warning("Failed to publish SSE event for job %s", job_id, exc_info=True)
 
 
 class DatabaseTaskRunner:

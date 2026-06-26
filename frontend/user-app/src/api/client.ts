@@ -180,6 +180,7 @@ export function subscribeJobEvents(
 
   source.onerror = (event) => {
     onError?.(event);
+    source.close();
   };
 
   return () => source.close();

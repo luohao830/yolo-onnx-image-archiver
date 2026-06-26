@@ -34,6 +34,7 @@ class JobPresenter:
     @classmethod
     def serialize_public_job(cls, job: Any, events: list[Any]) -> dict[str, Any]:
         return {
+            "id": job.id,
             "job_code": job.job_code,
             "mode": job.mode,
             "status": job.status,
@@ -60,15 +61,22 @@ class JobPresenter:
 
     @classmethod
     def serialize_admin_job_detail(cls, job: Any, events: list[Any]) -> dict[str, Any]:
-        payload = cls.serialize_admin_job(job, events)
-        payload.update(
-            {
-                "input_path": job.input_path,
-                "result_dir": job.result_dir,
-                "events": [cls.serialize_event(event) for event in events],
-                "summary": getattr(job, "summary_json", None),
-            }
-        )
+        # 直接从 raw field 构建，避免 serialize_admin_job 已包含的 events 被二次序列化。
+        payload = {
+            "id": job.id,
+            "job_code": job.job_code,
+            "mode": job.mode,
+            "status": job.status,
+            "progress": cls.calculate_progress(job, events),
+            "cancel_requested": bool(job.cancel_requested),
+            "error_message": job.error_message,
+            "result_zip_available": cls.has_result_zip(job),
+            "download_ready": cls.is_download_ready(job),
+            "input_path": job.input_path,
+            "result_dir": job.result_dir,
+            "events": [cls.serialize_event(event) for event in events],
+            "summary": getattr(job, "summary_json", None),
+        }
         return payload
 
     @classmethod

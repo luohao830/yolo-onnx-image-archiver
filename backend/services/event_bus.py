@@ -68,10 +68,13 @@ class EventBus:
 
 # 全局单例（在 main.py 中也可挂到 app.state，这里提供惰性获取入口）。
 _event_bus: EventBus | None = None
+_event_bus_lock = threading.Lock()
 
 
 def get_event_bus() -> EventBus:
     global _event_bus  # noqa: PLW0603
     if _event_bus is None:
-        _event_bus = EventBus()
+        with _event_bus_lock:
+            if _event_bus is None:
+                _event_bus = EventBus()
     return _event_bus

@@ -31,8 +31,20 @@ async def _stream_events(
     topic: str,
     history: list[dict[str, Any]],
     bus: EventBus | None,
+    request: Request | None = None,
     filter_public: bool = False,
 ) -> AsyncIterator[bytes]:
+    """SSE 事件流：先回放历史，再订阅 EventBus 实时推送。
+
+    注意：订阅发生在历史回放之后，存在一个微小窗口内发生的事件可能丢失。
+    当前单 worker 部署下此窗口极短，暂不引入去重机制；多 worker 需引入
+    全局回放序列号或 Redis pub/sub 来解决此问题。
+    """
+    async def _is_disconnected() -> bool:
+        if request is None:
+            return False
+        return await request.is_disconnected()
+
     # 先回放历史事件。
     for event in history:
         yield _sse(event)
@@ -40,6 +52,8 @@ async def _stream_events(
     if bus is None:
         # 无事件总线时退化为纯历史回放 + keepalive。
         while True:
+            if await _is_disconnected():
+                break
             await asyncio.sleep(KEEPALIVE_SECONDS)
             yield b": keepalive\n\n"
         return
@@ -47,6 +61,8 @@ async def _stream_events(
     queue = bus.subscribe(topic)
     try:
         while True:
+            if await _is_disconnected():
+                break
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_SECONDS)
                 if filter_public:
@@ -73,18 +89,18 @@ async def stream_public_job_events(
     request: Request,
     service: Annotated[JobService, Depends(get_job_service)],
 ) -> StreamingResponse:
-    job_id = service.get_public_job_id(job_code, access_token)
-    if job_id is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
-
     job = service.get_public_job(job_code, access_token)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
 
     events = job.get("events", [])
+    job_id = job.get("id")
+    if job_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="job not found")
+
     bus = _event_bus_from_request(request)
     return StreamingResponse(
-        _stream_events(topic=f"job:{job_id}", history=events, bus=bus, filter_public=True),
+        _stream_events(topic=f"job:{job_id}", history=events, bus=bus, request=request, filter_public=True),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -98,10 +114,9 @@ async def stream_public_job_events(
 async def stream_admin_job_events(
     job_id: int,
     request: Request,
-    admin: Annotated[dict[str, Any], Depends(require_admin_sse)],
+    _admin: Annotated[dict[str, Any], Depends(require_admin_sse)],
     service: Annotated[JobService, Depends(get_job_service)],
 ) -> StreamingResponse:
-    del admin
     try:
         job = service.get_admin_job(job_id)
     except LookupError as exc:
@@ -110,7 +125,7 @@ async def stream_admin_job_events(
     events = job.get("events", [])
     bus = _event_bus_from_request(request)
     return StreamingResponse(
-        _stream_events(topic=f"job:{job_id}", history=events, bus=bus),
+        _stream_events(topic=f"job:{job_id}", history=events, bus=bus, request=request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
