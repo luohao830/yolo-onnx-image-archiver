@@ -142,4 +142,5 @@ def get_admin_token_service() -> AdminTokenService:
     return AdminTokenService(
         secret_key=settings.resolve_admin_token_secret(),
         ttl_seconds=settings.admin_token_ttl_seconds,
+        sse_ttl_seconds=settings.sse_token_ttl_seconds,
     )

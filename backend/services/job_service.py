@@ -22,39 +22,11 @@ from backend.services.runtime_paths import RuntimePaths
 __all__ = ["UploadTooLargeError"]  # 从 job_upload_store 重新导出，保持向后兼容
 
 
-DEFAULT_JOB_PAYLOAD: dict[str, Any] = {
-    "recursive": True,
-    "batch": 16,
-    "imgsz": None,
-    "conf": 0.25,
-    "iou": 0.45,
-    "copy_fallback": False,
-    "preprocess_workers": 4,
-    "prefetch_batches": 2,
-    "allowed_class_ids": None,
-    "unmatched_label": "no_detection",
-    "force_class_names": None,
-    "draw_boxes": False,
-    "save_txt": False,
-    "execution_device": "auto",
-}
-
-PERSON_FILTER_PAYLOAD: dict[str, Any] = {
-    "allowed_class_ids": [0],
-    "unmatched_label": "no_person",
-    "force_class_names": ["person"],
-}
-
-
-def normalize_job_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
-    normalized = dict(DEFAULT_JOB_PAYLOAD)
-    if payload:
-        normalized.update(dict(payload))
-    if normalized["allowed_class_ids"] is not None:
-        normalized["allowed_class_ids"] = list(normalized["allowed_class_ids"])
-    if normalized["force_class_names"] is not None:
-        normalized["force_class_names"] = list(normalized["force_class_names"])
-    return normalized
+from backend.services.job_modes import (  # noqa: F401 — 重新导出，保持向后兼容
+    DEFAULT_JOB_PAYLOAD,
+    PERSON_FILTER_PAYLOAD,
+    normalize_job_payload,
+)
 
 
 def build_job_event(
