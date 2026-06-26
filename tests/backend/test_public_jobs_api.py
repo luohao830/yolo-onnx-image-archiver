@@ -182,7 +182,9 @@ def test_upload_public_person_filter_rejects_archive_over_upload_limit(
     service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
     receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
     scheduler = _FakeScheduler()
-    monkeypatch.setattr(job_upload_store, "MAX_UPLOAD_FILE_BYTES", 10, raising=False)
+    monkeypatch.setattr(
+        job_upload_store.JobUploadStore, "upload_limit_bytes", lambda: 10, raising=False
+    )
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("demo.jpg", b"image-bytes")

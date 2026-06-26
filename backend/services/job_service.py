@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import shutil
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, BinaryIO, Mapping
@@ -130,16 +131,18 @@ class JobService:
 
         with session_scope(self.engine) as session:
             repo = JobRepository(session)
-            job = repo.get(job_id)
-            if job.status != "created":
-                raise ValueError("job has already been uploaded or started")
-            updated = repo.mark_uploaded(
-                job.id,
-                input_path=str(input_dir),
-                model_id=model_id,
-            )
-            repo.record_event(job.id, **upload_event)
-            return updated.id, JobPresenter.serialize_public_job(updated, repo.list_events(updated.id))
+            try:
+                updated = repo.mark_uploaded(
+                    job_id,
+                    input_path=str(input_dir),
+                    model_id=model_id,
+                )
+                repo.record_event(job_id, **upload_event)
+                return updated.id, JobPresenter.serialize_public_job(updated, repo.list_events(updated.id))
+            except ValueError:
+                # 并发上传同一 job_code 时状态已非 created，清理本次写入并提示冲突
+                shutil.rmtree(input_dir, ignore_errors=True)
+                raise
 
     def list_admin_jobs(self) -> list[dict[str, Any]]:
         with session_scope(self.engine) as session:

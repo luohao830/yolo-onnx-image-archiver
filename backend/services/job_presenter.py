@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 SAFE_EVENT_PAYLOAD_KEYS = frozenset({
     "filename",
@@ -30,6 +30,14 @@ STATUS_PROGRESS: dict[str, int] = {
 
 class JobPresenter:
     """任务 DTO 序列化、进度计算与事件 payload 白名单过滤。"""
+
+    # 公开 SSE 事件允许暴露的顶层字段（白名单）。
+    PUBLIC_EVENT_TOP_KEYS = frozenset({
+        "id",
+        "event_type",
+        "message",
+        "payload_json",
+    })
 
     @classmethod
     def serialize_public_job(cls, job: Any, events: list[Any]) -> dict[str, Any]:
@@ -72,8 +80,7 @@ class JobPresenter:
             "error_message": job.error_message,
             "result_zip_available": cls.has_result_zip(job),
             "download_ready": cls.is_download_ready(job),
-            "input_path": job.input_path,
-            "result_dir": job.result_dir,
+            # 管理员详情不复用 serialize_admin_job，不再暴露物理路径。
             "events": [cls.serialize_event(event) for event in events],
             "summary": getattr(job, "summary_json", None),
         }
@@ -134,13 +141,13 @@ class JobPresenter:
             raise ValueError("job result is not ready")
         if not cls.has_result_zip(job):
             raise FileNotFoundError("job result archive not found")
-        return Path(job.result_zip_path)
+        return Path(cast(str, job.result_zip_path))
 
     @classmethod
     def resolve_result_dir(cls, job: Any) -> Path | None:
         if not getattr(job, "result_dir", None):
             return None
-        result_dir = Path(job.result_dir)
+        result_dir = Path(cast(str, job.result_dir))
         if not result_dir.is_dir():
             return None
         return result_dir

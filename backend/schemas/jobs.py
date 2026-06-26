@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CreateJobRequest(BaseModel):
@@ -48,6 +48,13 @@ class DetectionBox(BaseModel):
     confidence: float
     bbox: list[float]
     cls_id: int
+
+    @field_validator("bbox")
+    @classmethod
+    def _check_bbox_length(cls, v: list[float]) -> list[float]:
+        if len(v) != 4:
+            raise ValueError(f"bbox must contain exactly 4 coordinates, got {len(v)}")
+        return v
 
 
 class DetectionImage(BaseModel):

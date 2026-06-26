@@ -135,12 +135,18 @@ class TaskRunner:
             if result_out_dir is None:
                 self._fast_fail(job_id, "inference summary missing out_dir")
                 return
+            result_out_dir_path = Path(str(result_out_dir)).resolve()
+            try:
+                result_out_dir_path.relative_to(self.runtime_paths.results.resolve())
+            except ValueError:
+                self._fast_fail(job_id, "inference output outside result root")
+                return
             if detections:
-                inference_adapter.write_detections_json(Path(result_out_dir), detections)
-            zip_path = inference_adapter.package_job_output(Path(result_out_dir))
-        except Exception as exc:  # noqa: BLE001
-            error_message = str(exc) or exc.__class__.__name__
-            self._fast_fail(job_id, error_message)
+                inference_adapter.write_detections_json(result_out_dir_path, detections)
+            zip_path = inference_adapter.package_job_output(result_out_dir_path)
+        except Exception:  # noqa: BLE001
+            logger.exception("task runner inference failed for job %s", job_id)
+            self._fast_fail(job_id, "inference execution failed")
             return
 
         # ── 阶段 3：写终态（先检查取消标记）──────────────────────
@@ -155,7 +161,7 @@ class TaskRunner:
                 terminal_event = build_job_event(
                     event_type="canceled",
                     message="任务已被取消",
-                    payload_json={"result_dir": str(result_out_dir)},
+                    payload_json={"result_dir": str(result_out_dir_path)},
                 )
                 record = job_repo.record_event(job_id, **terminal_event)
                 terminal_record_id = getattr(record, "id", None)
@@ -164,14 +170,14 @@ class TaskRunner:
                 job_repo.update_summary(job_id, summary_json=summary_json)
                 job_repo.mark_completed(
                     job_id,
-                    result_dir=str(result_out_dir),
+                    result_dir=str(result_out_dir_path),
                     result_zip_path=str(zip_path),
                 )
                 terminal_event = build_job_event(
                     event_type="completed",
                     message="任务执行完成",
                     payload_json={
-                        "result_dir": str(result_out_dir),
+                        "result_dir": str(result_out_dir_path),
                         "result_zip_path": str(zip_path),
                         "total": summary.get("total"),
                         "written": summary.get("written"),

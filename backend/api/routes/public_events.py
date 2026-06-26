@@ -80,16 +80,17 @@ async def _stream_events(
 
 
 def _filter_event_for_public(event: dict[str, Any]) -> dict[str, Any]:
-    """对公开 SSE 实时事件过滤掉服务器路径等内部字段。"""
+    """公开 SSE 实时事件仅保留白名单顶层字段，并清洗 payload_json。"""
+    filtered: dict[str, Any] = {}
+    for key in JobPresenter.PUBLIC_EVENT_TOP_KEYS:
+        if key in event:
+            filtered[key] = event[key]
     payload = event.get("payload_json")
     if isinstance(payload, dict):
-        event = dict(event)
-        event["payload_json"] = JobPresenter.sanitize_event_payload(payload)
-    elif payload is not None and not isinstance(payload, dict):
-        # 非 dict 类型的 payload（如字符串、列表）不安全，直接替换为空字典。
-        event = dict(event)
-        event["payload_json"] = {}
-    return event
+        filtered["payload_json"] = JobPresenter.sanitize_event_payload(payload)
+    elif payload is not None:
+        filtered["payload_json"] = {}
+    return filtered
 
 
 @router.get("/jobs/{job_code}/events")

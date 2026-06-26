@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Any
 
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from backend.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class JobEventsTokenError(ValueError):
@@ -16,6 +19,10 @@ class JobEventsTokenService:
     """签发短期、绑定任务的公开 SSE 订阅令牌。"""
 
     def __init__(self, secret_key: str, ttl_seconds: int = 300) -> None:
+        if not secret_key:
+            raise ValueError("job events token secret key must not be empty")
+        if ttl_seconds <= 0:
+            raise ValueError(f"job events token ttl must be positive, got {ttl_seconds}")
         self.ttl_seconds = ttl_seconds
         self.serializer = URLSafeTimedSerializer(
             secret_key=secret_key,
@@ -49,7 +56,11 @@ class JobEventsTokenService:
 
 @lru_cache(maxsize=1)
 def get_job_events_token_service() -> JobEventsTokenService:
-    return JobEventsTokenService(
-        secret_key=settings.resolve_admin_token_secret(),
-        ttl_seconds=settings.sse_token_ttl_seconds,
-    )
+    try:
+        return JobEventsTokenService(
+            secret_key=settings.resolve_sse_token_secret(),
+            ttl_seconds=settings.sse_token_ttl_seconds,
+        )
+    except ValueError as exc:
+        logger.critical("Failed to initialize job events token service: %s", exc)
+        raise

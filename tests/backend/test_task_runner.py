@@ -47,16 +47,17 @@ def _make_runner(*, engine, gpu_gate=None, progress_recorder=None, runtime_paths
 
 
 def test_task_runner_persists_completion_with_real_repositories(monkeypatch, tmp_path: Path) -> None:
-    summary = {"out_dir": str(tmp_path / "results"), "total": 4, "written": 4}
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.run_job_inference", MagicMock(return_value=summary))
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.package_job_output", MagicMock(return_value=str(tmp_path / "results.zip")))
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.build_job_summary_json", lambda s: {"total": s["total"], "written": s["written"]})
-
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     runtime_paths = RuntimePaths(tmp_path / "runtime")
+    result_dir = runtime_paths.results / "JOB-100"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    summary = {"out_dir": str(result_dir), "total": 4, "written": 4}
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.run_job_inference", MagicMock(return_value=summary))
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.package_job_output", MagicMock(return_value=str(result_dir / "output.zip")))
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.build_job_summary_json", lambda s: {"total": s["total"], "written": s["written"]})
     job_id = None
 
     with session_scope(engine) as session:
@@ -83,19 +84,19 @@ def test_task_runner_persists_completion_with_real_repositories(monkeypatch, tmp
         events = session.query(JobEventRecord).filter_by(job_id=job_id).order_by(JobEventRecord.id).all()
         assert saved.status == "completed"
         assert saved.input_path == str(images_dir)
-        assert saved.result_dir == str(tmp_path / "results")
-        assert saved.result_zip_path == str(tmp_path / "results.zip")
+        assert saved.result_dir == str(result_dir)
+        assert saved.result_zip_path == str(result_dir / "output.zip")
         assert saved.error_message is None
         assert [e.event_type for e in events] == ["running", "completed"]
         assert events[0].message == "任务开始执行"
         assert events[0].payload_json == {
             "job_code": "JOB-100",
-            "out_dir": str(tmp_path / "runtime" / "results" / "JOB-100"),
+            "out_dir": str(runtime_paths.results / "JOB-100"),
         }
         assert events[1].message == "任务执行完成"
         assert events[1].payload_json == {
-            "result_dir": str(tmp_path / "results"),
-            "result_zip_path": str(tmp_path / "results.zip"),
+            "result_dir": str(result_dir),
+            "result_zip_path": str(result_dir / "output.zip"),
             "total": 4,
             "written": 4,
             "detections_ready": False,
@@ -138,7 +139,7 @@ def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_pa
         saved = JobRepository(session).get(job_id)
         events = session.query(JobEventRecord).filter_by(job_id=job_id).order_by(JobEventRecord.id).all()
         assert saved.status == "failed"
-        assert saved.error_message == "gpu unavailable"
+        assert saved.error_message == "inference execution failed"
         assert saved.result_dir is None
         assert saved.result_zip_path is None
         assert [e.event_type for e in events] == ["running", "failed"]
@@ -148,7 +149,7 @@ def test_task_runner_persists_failure_with_real_repositories(monkeypatch, tmp_pa
             "out_dir": str(tmp_path / "runtime" / "results" / "JOB-101"),
         }
         assert events[1].message == "任务执行失败"
-        assert events[1].payload_json == {"error": "gpu unavailable"}
+        assert events[1].payload_json == {"error": "inference execution failed"}
 
 
 def test_task_runner_marks_failed_when_model_is_missing(monkeypatch, tmp_path: Path) -> None:
@@ -188,8 +189,15 @@ def test_task_runner_marks_failed_when_model_is_missing(monkeypatch, tmp_path: P
 
 
 def test_task_runner_persists_summary_json(monkeypatch, tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    images_dir = tmp_path / "images"
+    images_dir.mkdir()
+    runtime_paths = RuntimePaths(tmp_path / "runtime")
+    result_dir = runtime_paths.results / "JOB-SUM"
+    result_dir.mkdir(parents=True, exist_ok=True)
     summary = {
-        "out_dir": str(tmp_path / "results"),
+        "out_dir": str(result_dir),
         "total": 5, "written": 5,
         "by_label": {"person": 4, "no_person": 1},
         "elapsed_sec": 1.23, "inference_sec": 0.8,
@@ -201,13 +209,7 @@ def test_task_runner_persists_summary_json(monkeypatch, tmp_path: Path) -> None:
         "cuda_enabled": False, "providers": ["CPUExecutionProvider"],
     }
     monkeypatch.setattr("backend.workers.task_runner.inference_adapter.run_job_inference", MagicMock(return_value=summary))
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.package_job_output", MagicMock(return_value=str(tmp_path / "results.zip")))
-
-    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
-    create_all(engine)
-    images_dir = tmp_path / "images"
-    images_dir.mkdir()
-    runtime_paths = RuntimePaths(tmp_path / "runtime")
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.package_job_output", MagicMock(return_value=str(result_dir / "output.zip")))
 
     with session_scope(engine) as session:
         model = ModelRecord(onnx_path=str(tmp_path / "model.onnx"))
@@ -235,18 +237,20 @@ def test_task_runner_persists_summary_json(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_task_runner_packages_output_from_summary_directory(monkeypatch, tmp_path: Path) -> None:
-    summary = {"out_dir": str(tmp_path / "summary-results"), "total": 3, "written": 3}
-    run_job_inference = MagicMock(return_value=summary)
-    package_job_output = MagicMock(return_value=str(tmp_path / "summary-results.zip"))
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.run_job_inference", run_job_inference)
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.package_job_output", package_job_output)
-    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.build_job_summary_json", lambda s: {"total": s["total"], "written": s["written"]})
-
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     runtime_paths = RuntimePaths(tmp_path / "runtime")
+    summary_dir = runtime_paths.results / "JOB-ZIP"
+    summary_dir.mkdir(parents=True, exist_ok=True)
+    summary = {"out_dir": str(summary_dir), "total": 3, "written": 3}
+    run_job_inference = MagicMock(return_value=summary)
+    package_job_output = MagicMock(return_value=str(summary_dir / "output.zip"))
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.run_job_inference", run_job_inference)
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.package_job_output", package_job_output)
+    monkeypatch.setattr("backend.workers.task_runner.inference_adapter.build_job_summary_json", lambda s: {"total": s["total"], "written": s["written"]})
+
     model = ModelRecord(onnx_path=str(tmp_path / "model.onnx"))
     with session_scope(engine) as session:
         session.add(model)
@@ -270,7 +274,7 @@ def test_task_runner_packages_output_from_summary_directory(monkeypatch, tmp_pat
     assert call_kwargs["payload"]["save_txt"] is True
     assert call_kwargs["payload"]["batch"] == 16
     assert call_kwargs["payload"]["copy_fallback"] is False
-    package_job_output.assert_called_once_with(tmp_path / "summary-results")
+    package_job_output.assert_called_once_with(summary_dir)
 
 
 # ── ProgressEventWriter 单元测试 ──
@@ -324,24 +328,25 @@ def test_task_run_result_success_path() -> None:
 
 def test_task_runner_phase1_writes_running_event(monkeypatch, tmp_path: Path) -> None:
     """mark_running + running event commit 在推理前独立完成。"""
-    monkeypatch.setattr(
-        "backend.workers.task_runner.inference_adapter.run_job_inference",
-        MagicMock(return_value={"out_dir": str(tmp_path / "results"), "total": 1, "written": 1}),
-    )
-    monkeypatch.setattr(
-        "backend.workers.task_runner.inference_adapter.package_job_output",
-        MagicMock(return_value=str(tmp_path / "results.zip")),
-    )
-    monkeypatch.setattr(
-        "backend.workers.task_runner.inference_adapter.build_job_summary_json",
-        lambda s: {"total": s.get("total", 0), "written": s.get("written", 0)},
-    )
-
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     runtime_paths = RuntimePaths(tmp_path / "runtime")
+    result_dir = runtime_paths.results / "JOB-PH1"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        "backend.workers.task_runner.inference_adapter.run_job_inference",
+        MagicMock(return_value={"out_dir": str(result_dir), "total": 1, "written": 1}),
+    )
+    monkeypatch.setattr(
+        "backend.workers.task_runner.inference_adapter.package_job_output",
+        MagicMock(return_value=str(result_dir / "output.zip")),
+    )
+    monkeypatch.setattr(
+        "backend.workers.task_runner.inference_adapter.build_job_summary_json",
+        lambda s: {"total": s.get("total", 0), "written": s.get("written", 0)},
+    )
 
     with session_scope(engine) as session:
         model = ModelRecord(onnx_path=str(tmp_path / "model.onnx"))

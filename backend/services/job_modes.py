@@ -105,7 +105,7 @@ def _require_float_in_range(payload: dict[str, Any], key: str, lo: float, hi: fl
     val = payload.get(key)
     if val is None:
         return
-    if not isinstance(val, (int, float)):
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
         raise ValueError(f"{key} must be a number, got {val!r}")
     if not (lo <= float(val) <= hi):
         raise ValueError(f"{key} must be in [{lo}, {hi}], got {float(val)}")
@@ -130,8 +130,8 @@ class PersonFilterModeHandler:
     def build_payload(self, advanced_payload: dict[str, Any] | None = None) -> dict[str, Any]:
         if advanced_payload:
             logger.info(
-                "person_filter mode ignoring user-supplied advanced_payload: %r",
-                {k: advanced_payload.get(k) for k in list(advanced_payload.keys())[:8]},
+                "person_filter mode ignoring user-supplied advanced_payload keys: %r",
+                list(advanced_payload.keys())[:8],
             )
         return normalize_job_payload(PERSON_FILTER_PAYLOAD)
 
@@ -173,6 +173,8 @@ class AdvancedModeHandler:
             raise LookupError(f"model not found: {model_id}")
         if not model.enabled:
             raise ValueError("model is not enabled")
+        if not model.visible_in_advanced_mode:
+            raise ValueError("model is not visible in advanced mode")
         return model_id
 
 

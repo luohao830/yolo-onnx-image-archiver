@@ -98,13 +98,17 @@ def write_detections_json(out_dir: Path, detections: list[dict[str, Any]]) -> Pa
 
 
 def read_detections_json(out_dir: Path) -> dict[str, Any] | None:
-    """读取 result_dir/_detections.json，不存在时返回 None，损坏时记录警告并返回 None。"""
+    """读取 result_dir/_detections.json，不存在时返回 None，损坏或类型异常时记录警告并返回 None。"""
     target = out_dir / DETECTIONS_FILENAME
     if not target.is_file():
         return None
     try:
         with target.open("r", encoding="utf-8") as fh:
-            return json.load(fh)
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            logger.warning("Detections JSON is not a dict (%s): %s", target, type(data).__name__)
+            return None
+        return data
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read detections JSON (%s): %s", target, exc)
         return None
