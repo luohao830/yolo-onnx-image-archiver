@@ -85,6 +85,7 @@ jobs:
           OCR_LLM_AUTH_TOKEN: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
           OCR_LLM_MODEL: ${{ secrets.OCR_LLM_MODEL }}
           OCR_LLM_USE_ANTHROPIC: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
+          OCR_LLM_REASONING_EFFORT: ${{ secrets.OCR_LLM_REASONING_EFFORT }}
         run: |
           if [ -z "${OCR_LLM_URL}" ] || [ -z "${OCR_LLM_AUTH_TOKEN}" ]; then
             echo "错误：OCR_LLM_URL 和 OCR_LLM_AUTH_TOKEN 为必填项，请检查仓库 Secrets 配置。"
@@ -99,7 +100,20 @@ jobs:
             ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC}"
           fi
           ocr config set language Chinese
-          ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+
+          # 配置思考强度：Anthropic 使用 thinking 格式，其他 OpenAI 兼容接口使用 reasoning_effort
+          if [ -n "${OCR_LLM_REASONING_EFFORT}" ]; then
+            if [ "${OCR_LLM_USE_ANTHROPIC}" = "true" ]; then
+              echo "使用 Anthropic Claude 思考模式配置：budget_tokens=${OCR_LLM_REASONING_EFFORT}"
+              ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": ${OCR_LLM_REASONING_EFFORT}}}"
+            else
+              echo "使用 OpenAI 思考模式配置：reasoning_effort=${OCR_LLM_REASONING_EFFORT}"
+              ocr config set llm.extra_body "{\"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
+            fi
+          else
+            echo "未配置思考强度，使用默认值（禁用 thinking 模式）"
+            ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+          fi
 
       - name: 运行 OpenCodeReview
         id: review
