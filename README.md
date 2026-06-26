@@ -223,3 +223,30 @@ cd frontend/user-app && npm run build
 - 公开前台的人员筛选模式可上传图片或 `.zip` 压缩包，后端会解压支持的图片、绑定已发布的默认人员模型并入队执行；`.zip` 每次都会重新上传并解压到当前任务目录；高级模式已支持自定义 `model_id` 与 `payload` 参数并上传文件入队。
 - SSE 实时事件推送基于进程内内存事件总线，仅适用于单 worker Uvicorn 部署；多 worker 需引入 Redis pub/sub（本次未实现）。公开端和管理员端均先签发短期 SSE token 再订阅事件，前端在 SSE 不可用时自动降级为轮询。
 - 任务完成后会落盘 `summary_json` 统计（by_label/耗时/批次/设备等）与逐图检测结果 `_detections.json`，并随结果压缩包打包。
+
+## OpenCodeReview 自动代码审查
+
+本仓库已接入 [OpenCodeReview](https://github.com/alibaba/open-code-review) GitHub Actions 工作流（`.github/workflows/ocr-review.yml`）。PR 打开、推送新提交或重新打开时，会自动运行代码审查并在 PR 上发布中文行内评论与汇总结论。也可以在 PR 评论中发送 `@open-code-review` 或 `/open-code-review` 手动触发重新审查。
+
+### 配置 Secrets
+
+在仓库 **Settings → Secrets and variables → Actions → Repository secrets** 中添加以下配置：
+
+| Secret | 是否必需 | 默认值 | 说明 |
+|--------|---------|--------|------|
+| `OCR_LLM_URL` | **是** | 无 | LLM API 地址，OpenAI 兼容格式，例如 `https://api.openai.com/v1/chat/completions` |
+| `OCR_LLM_AUTH_TOKEN` | **是** | 无 | LLM API 认证 Token |
+| `OCR_LLM_MODEL` | 否 | `gpt-4o` | 模型名称 |
+| `OCR_LLM_USE_ANTHROPIC` | 否 | 空 / `false` | 使用 Anthropic Claude 模型时设为 `true`，会影响思考强度参数格式 |
+| `OCR_LLM_REASONING_EFFORT` | 否 | 空 | 控制 LLM 思考强度。OpenAI 模型可填 `low` / `medium` / `high`；Anthropic Claude 模型可填数字表示 `budget_tokens`，例如 `16000` |
+
+### 思考强度配置说明
+
+- 未配置 `OCR_LLM_REASONING_EFFORT` 时，默认禁用 thinking 模式。
+- 当 `OCR_LLM_USE_ANTHROPIC` 为 `true` 时，`OCR_LLM_REASONING_EFFORT` 会作为 Claude 的 `thinking.budget_tokens` 传入（需为数字）。
+- 当 `OCR_LLM_USE_ANTHROPIC` 为空或 `false` 时，`OCR_LLM_REASONING_EFFORT` 会作为 OpenAI 的 `reasoning_effort` 传入（可填 `low` / `medium` / `high`）。
+
+配置示例：
+
+- OpenAI `o3` / `o1` 系列：`OCR_LLM_REASONING_EFFORT=low`
+- Anthropic Claude：`OCR_LLM_USE_ANTHROPIC=true`，`OCR_LLM_REASONING_EFFORT=16000`
