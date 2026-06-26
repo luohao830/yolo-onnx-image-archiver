@@ -21,6 +21,7 @@ from backend.api.routes.public_jobs import (
 )
 from backend.schemas.jobs import CreateJobRequest
 import backend.services.job_service as job_service
+import backend.services.job_upload_store as job_upload_store
 from backend.services.job_service import JobService, get_job_service
 from backend.services.runtime_paths import RuntimePaths
 from backend.services.model_service import ModelService
@@ -57,12 +58,12 @@ def test_get_public_job_returns_status_when_token_matches(tmp_path: Path) -> Non
     engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
     create_all(engine)
     service = JobService(engine)
-    receipt = create_job(CreateJobRequest(mode="advanced"), service=service)
+    receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
 
     payload = get_job(receipt.job_code, receipt.access_token, service=service)
 
     assert payload.job_code == receipt.job_code
-    assert payload.mode == "advanced"
+    assert payload.mode == "person_filter"
     assert payload.status == "created"
     assert payload.error_message is None
 
@@ -181,7 +182,7 @@ def test_upload_public_person_filter_rejects_archive_over_upload_limit(
     service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
     receipt = create_job(CreateJobRequest(mode="person_filter"), service=service)
     scheduler = _FakeScheduler()
-    monkeypatch.setattr(job_service, "MAX_UPLOAD_FILE_BYTES", 10, raising=False)
+    monkeypatch.setattr(job_upload_store, "MAX_UPLOAD_FILE_BYTES", 10, raising=False)
     archive = BytesIO()
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr("demo.jpg", b"image-bytes")
@@ -301,6 +302,9 @@ def test_openapi_contains_public_job_routes() -> None:
     assert "/api/jobs/{job_code}/reuse-upload" not in schema["paths"]
     assert "/api/jobs/{job_code}/download" in schema["paths"]
     assert "get" in schema["paths"]["/api/jobs/{job_code}/download"]
+    assert "/api/jobs/{job_code}/detections" in schema["paths"]
+    assert "/api/jobs/{job_code}/images/{file_path}" in schema["paths"]
+    assert "/api/jobs/{job_code}/events" in schema["paths"]
 
 
 def test_list_published_models_only_returns_enabled_advanced_models(tmp_path: Path) -> None:
@@ -387,3 +391,106 @@ def test_job_service_rejects_invalid_mode_without_persisting(tmp_path: Path) -> 
 
     with session_scope(engine) as session:
         assert session.query(JobRecord).count() == 0
+
+
+def test_create_advanced_job_with_model_and_payload(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="adv-model",
+                slug="adv-model",
+                onnx_path="models/adv.onnx",
+                model_kind="object_detector",
+                enabled=True,
+                visible_in_advanced_mode=True,
+            )
+        )
+
+    receipt = create_job(
+        CreateJobRequest(
+            mode="advanced",
+            model_id=1,
+            payload={"conf": 0.4, "iou": 0.5, "draw_boxes": True, "save_txt": True},
+        ),
+        service=service,
+    )
+
+    assert receipt.status == "created"
+    with session_scope(engine) as session:
+        saved = JobRepository(session).get_by_code(receipt.job_code)
+        assert saved is not None
+        assert saved.mode == "advanced"
+        assert saved.model_id == 1
+        assert saved.payload_json["conf"] == 0.4
+        assert saved.payload_json["draw_boxes"] is True
+        # normalize 合并了默认值。
+        assert saved.payload_json["batch"] == 16
+
+
+def test_create_advanced_job_rejects_non_visible_model(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="hidden",
+                slug="hidden",
+                onnx_path="models/hidden.onnx",
+                model_kind="object_detector",
+                enabled=True,
+                visible_in_advanced_mode=False,
+            )
+        )
+
+    with pytest.raises(HTTPException) as exc:
+        create_job(CreateJobRequest(mode="advanced", model_id=1), service=service)
+    assert exc.value.status_code == 400
+
+
+def test_upload_advanced_job_binds_payload_model(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine, runtime_paths=RuntimePaths(tmp_path / "runtime"))
+    scheduler = _FakeScheduler()
+
+    with session_scope(engine) as session:
+        session.add(
+            ModelRecord(
+                name="adv-model",
+                slug="adv-model",
+                onnx_path="models/adv.onnx",
+                model_kind="object_detector",
+                enabled=True,
+                visible_in_advanced_mode=True,
+            )
+        )
+
+    receipt = create_job(
+        CreateJobRequest(mode="advanced", model_id=1, payload={"conf": 0.3}),
+        service=service,
+    )
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("demo.jpg", b"image-bytes")
+    archive.seek(0)
+
+    payload = upload_job_file(
+        receipt.job_code,
+        receipt.access_token,
+        file=UploadFile(file=archive, filename="images.zip"),
+        service=service,
+        scheduler=scheduler,
+    )
+
+    assert payload.status == "uploaded"
+    with session_scope(engine) as session:
+        saved = JobRepository(session).get_by_code(receipt.job_code)
+        assert saved is not None
+        assert saved.model_id == 1
+        assert scheduler.submitted == [saved.id]

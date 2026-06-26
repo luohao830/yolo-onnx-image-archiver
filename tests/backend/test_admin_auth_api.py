@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from starlette.requests import Request
 
-from backend.api.deps import require_admin
+from backend.api.deps import require_admin, require_admin_sse
 from backend.api.routes.admin_auth import LoginRequest, admin_login
 from backend.core.admin_auth import get_admin_token_service
 from backend.core.config import settings
@@ -100,6 +100,68 @@ def test_require_admin_rejects_invalid_token(monkeypatch: pytest.MonkeyPatch) ->
     assert error.value.status_code == 401
 
 
+def test_require_admin_rejects_sse_token_as_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_admin_secret(monkeypatch)
+    token_service = get_admin_token_service()
+
+    with pytest.raises(HTTPException) as error:
+        require_admin(
+            credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token_service.issue_sse(1)),
+            token_service=token_service,
+            request=_request_for_client("192.168.1.9"),
+        )
+
+    assert error.value.status_code == 401
+
+
+def test_require_admin_sse_accepts_job_bound_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_admin_secret(monkeypatch)
+    token_service = get_admin_token_service()
+
+    claims = require_admin_sse(
+        job_id=7,
+        sse_token=token_service.issue_sse(7),
+        token_service=token_service,
+        request=_request_for_client("192.168.1.9"),
+    )
+
+    assert claims["role"] == "admin"
+    assert claims["purpose"] == "job-events"
+    assert claims["job_id"] == 7
+
+
+def test_require_admin_sse_rejects_missing_or_wrong_job_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_admin_secret(monkeypatch)
+    token_service = get_admin_token_service()
+
+    with pytest.raises(HTTPException) as missing_error:
+        require_admin_sse(
+            job_id=7,
+            sse_token=None,
+            token_service=token_service,
+            request=_request_for_client("192.168.1.9"),
+        )
+    assert missing_error.value.status_code == 401
+
+    with pytest.raises(HTTPException) as wrong_job_error:
+        require_admin_sse(
+            job_id=8,
+            sse_token=token_service.issue_sse(7),
+            token_service=token_service,
+            request=_request_for_client("192.168.1.9"),
+        )
+    assert wrong_job_error.value.status_code == 401
+
+    with pytest.raises(HTTPException) as bearer_error:
+        require_admin_sse(
+            job_id=7,
+            sse_token=token_service.issue(),
+            token_service=token_service,
+            request=_request_for_client("192.168.1.9"),
+        )
+    assert bearer_error.value.status_code == 401
+
+
 def test_admin_login_allows_whitelisted_ip_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     _set_admin_secret(monkeypatch)
     monkeypatch.setattr(settings, "admin_ip_whitelist", "10.0.0.7,127.0.0.1")
@@ -120,6 +182,22 @@ def test_require_admin_allows_whitelisted_ip_without_token(monkeypatch: pytest.M
 
     claims = require_admin(
         credentials=None,
+        token_service=get_admin_token_service(),
+        request=_request_for_client("172.18.0.3", real_ip="10.0.0.7"),
+    )
+
+    assert claims["role"] == "admin"
+    assert claims["auth_method"] == "ip_whitelist"
+
+
+def test_require_admin_sse_allows_whitelisted_ip_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_admin_secret(monkeypatch)
+    monkeypatch.setattr(settings, "admin_ip_whitelist", "10.0.0.7")
+    monkeypatch.setattr(settings, "admin_trusted_proxy_cidrs", "172.16.0.0/12")
+
+    claims = require_admin_sse(
+        job_id=7,
+        sse_token=None,
         token_service=get_admin_token_service(),
         request=_request_for_client("172.18.0.3", real_ip="10.0.0.7"),
     )

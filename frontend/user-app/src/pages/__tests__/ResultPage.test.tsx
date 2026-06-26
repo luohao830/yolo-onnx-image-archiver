@@ -2,12 +2,16 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildJobDownloadUrl, getJobStatus } from "../../api/client";
+import { buildJobDownloadUrl, getJobDetections, getJobStatus } from "../../api/client";
 import { ResultPage } from "../ResultPage";
 
 vi.mock("../../api/client", () => ({
   buildJobDownloadUrl: vi.fn(() => "/api/jobs/JOB-200/download?access_token=token-200"),
-  getJobStatus: vi.fn()
+  getJobStatus: vi.fn(),
+  getJobDetections: vi.fn(),
+  subscribeJobEvents: vi.fn(() => () => {}),
+  buildJobImageUrl: vi.fn(),
+  buildJobEventsUrl: vi.fn()
 }));
 
 describe("ResultPage", () => {
@@ -16,6 +20,7 @@ describe("ResultPage", () => {
     vi.mocked(buildJobDownloadUrl).mockImplementation(
       (jobCode: string, accessToken: string) => `/api/jobs/${jobCode}/download?access_token=${accessToken}`
     );
+    vi.mocked(getJobDetections).mockResolvedValue({ images: [] });
   });
 
   afterEach(() => {

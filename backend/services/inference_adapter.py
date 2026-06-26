@@ -1,9 +1,52 @@
 from __future__ import annotations
 
+import json
+import logging
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from webui.processing import InferenceProgress, package_output_dir, run_inference
+
+logger = logging.getLogger(__name__)
+
+
+# 落盘到 JobRecord.summary_json 时保留的字段（排除 out_dir 等非统计项）。
+SUMMARY_JSON_KEYS = (
+    "total",
+    "written",
+    "by_label",
+    "elapsed_sec",
+    "inference_sec",
+    "preprocess_sec",
+    "postprocess_sec",
+    "hardlink_sec",
+    "draw_sec",
+    "drawn",
+    "txt_written",
+    "hardlinked",
+    "copied",
+    "failed",
+    "used_batch",
+    "used_imgsz",
+    "cuda_enabled",
+    "providers",
+)
+
+DETECTIONS_FILENAME = "_detections.json"
+
+
+def build_job_summary_json(summary: Mapping[str, Any]) -> dict[str, Any]:
+    """从 run_inference 返回的 summary 提取可落盘的统计字段。"""
+    result: dict[str, Any] = {}
+    for key in SUMMARY_JSON_KEYS:
+        if key in summary and summary[key] is not None:
+            value = summary[key]
+            # tuple/imgsz 转为 list，便于 JSON 序列化与前端消费。
+            if key == "used_imgsz" and isinstance(value, tuple):
+                value = list(value)
+            result[key] = value
+    return result
 
 
 def run_job_inference(
@@ -13,6 +56,7 @@ def run_job_inference(
     out_dir: Path,
     payload: Mapping[str, Any],
     progress_callback: Callable[[InferenceProgress], None] | None = None,
+    detection_callback: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> dict[str, Any]:
     summary = run_inference(
         model_path=model_path,
@@ -33,8 +77,37 @@ def run_job_inference(
         save_txt=bool(payload["save_txt"]),
         execution_device=str(payload["execution_device"]),
         progress_callback=progress_callback,
+        detection_callback=detection_callback,
     )
     return summary.__dict__
+
+
+def write_detections_json(out_dir: Path, detections: list[dict[str, Any]]) -> Path:
+    """将逐图检测结果原子写入 result_dir/_detections.json（先写临时文件再 rename）。"""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    target = out_dir / DETECTIONS_FILENAME
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json", prefix=f".{DETECTIONS_FILENAME}-", dir=out_dir)
+    try:
+        with open(tmp_fd, "w", encoding="utf-8") as fh:
+            json.dump({"images": detections}, fh, ensure_ascii=False)
+        Path(tmp_path).replace(target)
+    except Exception:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
+    return target
+
+
+def read_detections_json(out_dir: Path) -> dict[str, Any] | None:
+    """读取 result_dir/_detections.json，不存在时返回 None，损坏时记录警告并返回 None。"""
+    target = out_dir / DETECTIONS_FILENAME
+    if not target.is_file():
+        return None
+    try:
+        with target.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read detections JSON (%s): %s", target, exc)
+        return None
 
 
 def package_job_output(out_dir: Path) -> str:
