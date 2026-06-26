@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
+import tempfile
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from webui.processing import InferenceProgress, package_output_dir, run_inference
+
+logger = logging.getLogger(__name__)
 
 
 # 落盘到 JobRecord.summary_json 时保留的字段（排除 out_dir 等非统计项）。
@@ -79,21 +83,31 @@ def run_job_inference(
 
 
 def write_detections_json(out_dir: Path, detections: list[dict[str, Any]]) -> Path:
-    """将逐图检测结果写入 result_dir/_detections.json。"""
+    """将逐图检测结果原子写入 result_dir/_detections.json（先写临时文件再 rename）。"""
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / DETECTIONS_FILENAME
-    with target.open("w", encoding="utf-8") as fh:
-        json.dump({"images": detections}, fh, ensure_ascii=False)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".json", prefix=f".{DETECTIONS_FILENAME}-", dir=out_dir)
+    try:
+        with open(tmp_fd, "w", encoding="utf-8") as fh:
+            json.dump({"images": detections}, fh, ensure_ascii=False)
+        Path(tmp_path).replace(target)
+    except Exception:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
     return target
 
 
 def read_detections_json(out_dir: Path) -> dict[str, Any] | None:
-    """读取 result_dir/_detections.json，不存在时返回 None。"""
+    """读取 result_dir/_detections.json，不存在时返回 None，损坏时记录警告并返回 None。"""
     target = out_dir / DETECTIONS_FILENAME
     if not target.is_file():
         return None
-    with target.open("r", encoding="utf-8") as fh:
-        return json.load(fh)
+    try:
+        with target.open("r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to read detections JSON (%s): %s", target, exc)
+        return None
 
 
 def package_job_output(out_dir: Path) -> str:

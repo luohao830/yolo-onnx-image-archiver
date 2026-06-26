@@ -9,23 +9,22 @@ interface Props {
 }
 interface State {
   hasError: boolean;
-  message?: string;
+  retryKey: number;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false };
+  state: State = { hasError: false, retryKey: 0 };
 
-  static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, message: error.message };
+  static getDerivedStateFromError(_error: Error): Partial<State> {
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // 优先日志而非 print；这里输出到 console 便于前端排查。
     console.error("[ErrorBoundary] 渲染异常:", error, info);
   }
 
   private handleReset = () => {
-    this.setState({ hasError: false, message: undefined });
+    this.setState((prev) => ({ hasError: false, retryKey: prev.retryKey + 1 }));
   };
 
   render(): ReactNode {
@@ -40,9 +39,9 @@ export class ErrorBoundary extends Component<Props, State> {
             <AlertTriangle className="h-5 w-5" aria-hidden />
             <span>页面渲染出现问题</span>
           </div>
-          {this.state.message ? (
-            <p className="text-sm leading-relaxed text-red-700">{this.state.message}</p>
-          ) : null}
+          <p className="text-sm leading-relaxed text-red-700">
+            页面加载过程中发生了意外错误，请重试。如问题持续出现，请联系管理员。
+          </p>
           <Button variant="secondary" size="sm" onClick={this.handleReset}>
             <RefreshCw className="h-4 w-4" aria-hidden />
             重试
@@ -50,6 +49,11 @@ export class ErrorBoundary extends Component<Props, State> {
         </div>
       );
     }
-    return this.props.children;
+    return <ErrorBoundaryRetryRoot key={this.state.retryKey}>{this.props.children}</ErrorBoundaryRetryRoot>;
   }
+}
+
+/** 辅助组件：在 key 变化时强制重新挂载 children（重置 React 内部状态）。 */
+function ErrorBoundaryRetryRoot({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

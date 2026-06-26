@@ -76,9 +76,14 @@ async def _stream_events(
 
 def _filter_event_for_public(event: dict[str, Any]) -> dict[str, Any]:
     """对公开 SSE 实时事件过滤掉服务器路径等内部字段。"""
-    if "payload_json" in event and isinstance(event["payload_json"], dict):
+    payload = event.get("payload_json")
+    if isinstance(payload, dict):
         event = dict(event)
-        event["payload_json"] = JobPresenter.sanitize_event_payload(event["payload_json"])
+        event["payload_json"] = JobPresenter.sanitize_event_payload(payload)
+    elif payload is not None and not isinstance(payload, dict):
+        # 非 dict 类型的 payload（如字符串、列表）不安全，直接替换为空字典。
+        event = dict(event)
+        event["payload_json"] = {}
     return event
 
 
@@ -105,7 +110,6 @@ async def stream_public_job_events(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
         },
     )
 
@@ -130,6 +134,5 @@ async def stream_admin_job_events(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
         },
     )

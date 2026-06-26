@@ -63,7 +63,13 @@ class EventBus:
         try:
             subscriber.queue.put_nowait(event)
         except asyncio.QueueFull:
-            logger.warning("event bus queue full, dropping event for topic=%s", topic)
+            logger.warning(
+                "event bus queue full (maxsize=%d), dropping subscriber for topic=%s",
+                subscriber.queue.maxsize,
+                topic,
+            )
+            # 消费者已无法跟上，标记为不活跃避免后续空转投递。
+            subscriber.active = False
 
 
 # 全局单例（在 main.py 中也可挂到 app.state，这里提供惰性获取入口）。

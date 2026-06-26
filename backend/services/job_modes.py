@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping, Protocol
 
 from sqlalchemy.orm import Session
 
 from backend.repositories.models import ModelRepository
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_JOB_PAYLOAD: dict[str, Any] = {
     "recursive": True,
@@ -56,7 +59,9 @@ def _require_positive_int(payload: dict[str, Any], key: str) -> None:
     val = payload.get(key)
     if val is None:
         return
-    if not isinstance(val, (int, float)) or int(val) <= 0:
+    if not isinstance(val, int) or isinstance(val, bool):
+        raise ValueError(f"{key} must be an integer, got {type(val).__name__} {val!r}")
+    if val <= 0:
         raise ValueError(f"{key} must be a positive integer, got {val!r}")
 
 
@@ -64,7 +69,9 @@ def _require_non_negative_int(payload: dict[str, Any], key: str) -> None:
     val = payload.get(key)
     if val is None:
         return
-    if not isinstance(val, (int, float)) or int(val) < 0:
+    if not isinstance(val, int) or isinstance(val, bool):
+        raise ValueError(f"{key} must be an integer, got {type(val).__name__} {val!r}")
+    if val < 0:
         raise ValueError(f"{key} must be a non-negative integer, got {val!r}")
 
 
@@ -95,7 +102,11 @@ class PersonFilterModeHandler:
     """人员筛选模式：绑定默认人员模型，合并 person_filter 默认 payload。"""
 
     def build_payload(self, advanced_payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        del advanced_payload
+        if advanced_payload:
+            logger.info(
+                "person_filter mode ignoring user-supplied advanced_payload: %r",
+                {k: advanced_payload.get(k) for k in list(advanced_payload.keys())[:8]},
+            )
         return normalize_job_payload(PERSON_FILTER_PAYLOAD)
 
     def validate_create(self, session: Session, model_id: int | None) -> None:
@@ -131,7 +142,9 @@ class AdvancedModeHandler:
     def resolve_model_id_for_upload(self, session: Session, model_id: int | None) -> int:
         if model_id is None:
             raise ValueError("advanced job has no model bound")
-        ModelRepository(session).get(model_id)
+        model = ModelRepository(session).get(model_id)
+        if not model.enabled:
+            raise ValueError("model is not enabled")
         return model_id
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -13,6 +14,7 @@ def _nms_xyxy(boxes: "np.ndarray", scores: "np.ndarray", iou_thres: float) -> Li
     x2 = boxes[:, 2]
     y2 = boxes[:, 3]
     areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    areas = np.maximum(areas, 1.0)  # 防止退化框导致除零
     order = scores.argsort()[::-1]
 
     keep: List[int] = []
@@ -208,10 +210,8 @@ def _write_yolo_txt(
     orig_hw: Tuple[int, int],
     imgsz: Tuple[int, int],
 ) -> None:
-    from pathlib import Path as _Path
-
-    if not isinstance(txt_path, _Path):
-        txt_path = _Path(txt_path)
+    if not isinstance(txt_path, Path):
+        txt_path = Path(txt_path)
     txt_path.parent.mkdir(parents=True, exist_ok=True)
     orig_h, orig_w = orig_hw
     if len(cls_ids) == 0:

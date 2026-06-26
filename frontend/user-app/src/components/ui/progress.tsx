@@ -29,7 +29,7 @@ export const Progress = forwardRef<HTMLDivElement, ProgressProps>(
         <div
           className={cn(
             "h-full rounded-full transition-[width] duration-220 ease-out",
-            active ? "bg-brand" : "bg-brand",
+            active ? "bg-brand animate-pulse" : "bg-brand",
           )}
           style={{ width: `${clamped}%` }}
         />

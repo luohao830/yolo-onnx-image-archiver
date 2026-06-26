@@ -19,6 +19,9 @@ from backend.services.job_upload_store import JobUploadStore, UploadTooLargeErro
 from backend.services.runtime_paths import RuntimePaths
 
 
+__all__ = ["UploadTooLargeError"]  # 从 job_upload_store 重新导出，保持向后兼容
+
+
 DEFAULT_JOB_PAYLOAD: dict[str, Any] = {
     "recursive": True,
     "batch": 16,
@@ -52,9 +55,6 @@ def normalize_job_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     if normalized["force_class_names"] is not None:
         normalized["force_class_names"] = list(normalized["force_class_names"])
     return normalized
-
-
-__all__ = ["UploadTooLargeError"]  # 从 job_upload_store 重新导出，保持向后兼容
 
 
 def build_job_event(
@@ -288,10 +288,7 @@ class JobService:
             access_token_hash,
         )
 
-# ---------------------------------------------------------------
-#    序列化 / 进度 / 路径委托 → JobPresenter
-#    JobService 自身不再持有序列化细节，仅编排 use case。
-# ---------------------------------------------------------------
+# JobService 自身不再持有序列化细节，仅编排 use case（序列化 / 进度 / 路径委托 → JobPresenter）。
 
 
 @lru_cache(maxsize=1)

@@ -63,10 +63,10 @@ describe("getFallbackProgress", () => {
     expect(getFallbackProgress("canceled")).toBe(0);
   });
 
-  it("returns 100 for uploaded, completed, and failed", () => {
-    expect(getFallbackProgress("uploaded")).toBe(100);
+  it("returns 10 for uploaded, 100 for completed, 0 for failed", () => {
+    expect(getFallbackProgress("uploaded")).toBe(10);
     expect(getFallbackProgress("completed")).toBe(100);
-    expect(getFallbackProgress("failed")).toBe(100);
+    expect(getFallbackProgress("failed")).toBe(0);
   });
 
   it("returns 0 for running (progress comes from events)", () => {

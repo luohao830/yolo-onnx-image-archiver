@@ -14,7 +14,6 @@ SAFE_EVENT_PAYLOAD_KEYS = frozenset({
     "processed",
     "matched",
     "skipped",
-    "error",
     "detections_ready",
 })
 
@@ -23,7 +22,8 @@ STATUS_PROGRESS: dict[str, int] = {
     "uploaded": 100,
     "running": 0,
     "completed": 100,
-    "failed": 100,
+    # 失败时如果没有进度事件则回退到 0（而非 100），避免误导"失败但 100% 完成"。
+    "failed": 0,
     "canceled": 0,
 }
 

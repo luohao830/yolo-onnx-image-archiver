@@ -10,12 +10,13 @@ const STAGES: Array<{ key: JobStatus; label: string }> = [
   { key: "completed", label: "完成" },
 ];
 
-const ORDER: JobStatus[] = ["created", "uploaded", "running", "completed"];
+const ORDER: JobStatus[] = STAGES.map((s) => s.key);
 
 function stageTimestamp(status: JobStatus, events: JobEvent[]): string | null {
   const event = events.find((e) => e.event_type === status);
   if (!event) return null;
-  return event.payload_json?.timestamp as string | undefined ?? null;
+  const ts = event.payload_json?.timestamp;
+  return typeof ts === "string" ? ts : null;
 }
 
 interface ProgressTimelineProps {
@@ -27,10 +28,10 @@ interface ProgressTimelineProps {
 /** 进度时间线：created→uploaded→running→completed 四节点。 */
 export function ProgressTimeline({ status, events, className }: ProgressTimelineProps) {
   const currentIndex = ORDER.indexOf(status);
-  // failed/canceled 时停在 running 之前的可达阶段。
+  // failed/canceled 不在 ORDER 中（indexOf 返回 -1），此时停在 running 阶段。
   const reachableIndex =
     status === "failed" || status === "canceled"
-      ? Math.max(0, currentIndex)
+      ? ORDER.indexOf("running")
       : currentIndex;
 
   return (

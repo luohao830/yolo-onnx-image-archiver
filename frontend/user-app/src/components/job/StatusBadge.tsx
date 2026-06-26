@@ -22,10 +22,9 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
     <Badge variant={status} className={cn("transition-colors duration-200", className)}>
       <span
         className={cn(
-          "mr-1.5 inline-block h-1.5 w-1.5 rounded-full",
+          "mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-current",
           status === "running" && "animate-pulse",
         )}
-        style={{ backgroundColor: "currentColor" }}
         aria-hidden
       />
       {STATUS_LABELS[status] ?? status}

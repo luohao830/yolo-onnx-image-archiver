@@ -25,10 +25,10 @@ export function clampProgress(progress: number): number {
 export function getFallbackProgress(status: JobStatus): number {
   const values: Record<JobStatus, number> = {
     created: 0,
-    uploaded: 100,
+    uploaded: 10,
     running: 0,
     completed: 100,
-    failed: 100,
+    failed: 0,
     canceled: 0,
   };
   return values[status];

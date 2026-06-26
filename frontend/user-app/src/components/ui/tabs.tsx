@@ -12,19 +12,19 @@ const TabsContext = createContext<TabsContextValue | null>(null);
 
 function useTabsContext(component: string): TabsContextValue {
   const ctx = useContext(TabsContext);
-  if (!ctx) throw new Error(`${component} 必须在 <Tabs> 内使用`);
+  if (!ctx) throw new Error(`${component} must be used inside <Tabs>`);
   return ctx;
 }
 
 interface TabsProps {
   value?: string;
-  defaultValue: string;
+  defaultValue?: string;
   onValueChange?: (v: string) => void;
   children: ReactNode;
   className?: string;
 }
 
-export function Tabs({ value, defaultValue, onValueChange, children, className }: TabsProps) {
+export function Tabs({ value, defaultValue = "", onValueChange, children, className }: TabsProps) {
   const isControlled = value !== undefined;
   const [internal, setInternal] = useState(defaultValue);
   const baseId = useId();
@@ -93,13 +93,14 @@ interface TabsContentProps {
 
 export function TabsContent({ value, children, className }: TabsContentProps) {
   const ctx = useTabsContext("TabsContent");
-  if (ctx.value !== value) return null;
+  const active = ctx.value === value;
   return (
     <div
       role="tabpanel"
       id={`${ctx.baseId}-panel-${value}`}
       aria-labelledby={`${ctx.baseId}-tab-${value}`}
-      className={cn("focus-visible:outline-none", className)}
+      hidden={!active}
+      className={cn(className)}
     >
       {children}
     </div>

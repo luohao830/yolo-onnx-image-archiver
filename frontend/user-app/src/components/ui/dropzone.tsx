@@ -33,21 +33,39 @@ export function Dropzone({
       e.stopPropagation();
       setDragOver(false);
       if (disabled) return;
-      const files = Array.from(e.dataTransfer.files ?? []);
+      let files = Array.from(e.dataTransfer.files ?? []);
+      // 过滤 accept 和 multiple 约束（拖拽场景下浏览器不做校验）
+      if (accept) {
+        const allowed = accept.split(",").map((s) => s.trim().toLowerCase());
+        files = files.filter((f) => {
+          const ext = `.${f.name.split(".").pop()?.toLowerCase()}`;
+          const mimePrefix = f.type.split("/")[0];
+          return (
+            allowed.some((a) => a === ext || a === f.type || (a.endsWith("/*") && a.startsWith(`${mimePrefix}/`)))
+          );
+        });
+      }
+      if (!multiple) files = files.slice(0, 1);
       if (files.length) onFiles(files);
     },
-    [disabled, onFiles],
+    [disabled, onFiles, accept, multiple],
   );
 
   const handlePick = (files: FileList | null) => {
-    if (!files) return;
-    onFiles(Array.from(files));
+    if (!files || disabled) return;
+    const picked = Array.from(files);
+    if (!multiple) {
+      onFiles(picked.slice(0, 1));
+    } else {
+      onFiles(picked);
+    }
   };
 
   return (
     <div
       role="button"
       tabIndex={0}
+      aria-label="文件上传区域"
       aria-disabled={disabled}
       onClick={() => !disabled && inputRef.current?.click()}
       onKeyDown={(e) => {

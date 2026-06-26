@@ -28,7 +28,7 @@ class JobUploadStore:
         filename: str,
         file_obj: BinaryIO,
     ) -> tuple[Path, dict[str, Any]]:
-        safe_filename = Path(filename or "upload").name or "upload"
+        safe_filename = Path(filename or "upload").name
         suffix = Path(safe_filename).suffix.lower()
         if suffix != ".zip" and suffix not in SUPPORTED_IMAGE_SUFFIXES:
             raise ValueError("仅支持图片文件或 zip 压缩包")
@@ -40,31 +40,35 @@ class JobUploadStore:
 
         size_bytes = self._copy_upload_with_size_limit(file_obj, raw_path)
 
-        if input_dir.exists():
-            shutil.rmtree(input_dir)
+        try:
+            if input_dir.exists():
+                shutil.rmtree(input_dir)
 
-        if suffix == ".zip":
-            extracted = extract_upload_archive(raw_path, input_dir)
-            if not extracted:
-                raise ValueError("压缩包内未找到支持的图片")
+            if suffix == ".zip":
+                extracted = extract_upload_archive(raw_path, input_dir)
+                if not extracted:
+                    raise ValueError("压缩包内未找到支持的图片")
+                return (
+                    input_dir,
+                    self._build_upload_event(
+                        total=len(extracted),
+                        filename=safe_filename,
+                        size_bytes=size_bytes,
+                    ),
+                )
+
+            self._copy_single_image_to_input(raw_path, input_dir)
             return (
                 input_dir,
                 self._build_upload_event(
-                    total=len(extracted),
+                    total=self._count_input_images(input_dir),
                     filename=safe_filename,
                     size_bytes=size_bytes,
                 ),
             )
-
-        self._copy_single_image_to_input(raw_path, input_dir)
-        return (
-            input_dir,
-            self._build_upload_event(
-                total=self._count_input_images(input_dir),
-                filename=safe_filename,
-                size_bytes=size_bytes,
-            ),
-        )
+        finally:
+            # 无论解压/复制成功或失败，清理上传的原始文件释放磁盘空间
+            raw_path.unlink(missing_ok=True)
 
     @staticmethod
     def _copy_upload_with_size_limit(file_obj: BinaryIO, raw_path: Path) -> int:
@@ -77,7 +81,8 @@ class JobUploadStore:
                         break
                     written += len(chunk)
                     if written > MAX_UPLOAD_FILE_BYTES:
-                        raise UploadTooLargeError("上传文件大小不能超过 100G")
+                        limit_gb = MAX_UPLOAD_FILE_BYTES // (1024 * 1024 * 1024)
+                        raise UploadTooLargeError(f"上传文件大小不能超过 {limit_gb}G")
                     dst.write(chunk)
         except Exception:
             raw_path.unlink(missing_ok=True)

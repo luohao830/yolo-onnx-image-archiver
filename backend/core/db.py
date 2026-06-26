@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, exc, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -37,9 +40,12 @@ def _ensure_legacy_columns(engine: Engine) -> None:
         try:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE jobs ADD COLUMN summary_json JSON"))
-        except Exception:
-            # 并发启动时另一个 worker 可能已添加该列。
+        except (exc.OperationalError, exc.ProgrammingError):
+            # 并发启动时另一个 worker 可能已添加该列（SQLite 报 "duplicate column"）。
             pass
+        except Exception:
+            logger.exception("Failed to add summary_json column")
+            raise
 
 
 @contextmanager

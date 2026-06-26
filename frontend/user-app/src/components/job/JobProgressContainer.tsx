@@ -39,7 +39,10 @@ export function JobProgressContainer({
   const normalizedAccessToken = useMemo(() => accessToken.trim(), [accessToken]);
   const enabled = Boolean(normalizedJobCode && normalizedAccessToken);
   const onStatusRef = useRef(onStatus);
-  onStatusRef.current = onStatus;
+
+  useEffect(() => {
+    onStatusRef.current = onStatus;
+  });
 
   const fetchSnapshot = useCallback(async () => {
     if (!normalizedJobCode || !normalizedAccessToken) {
@@ -122,7 +125,7 @@ export function JobProgressContainer({
       {status === "completed" && summary ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <KpiCard title="总图数" value={totalImages ?? "—"} icon={ImageIcon} />
-          <KpiCard title="已写入" value={written ?? "—"} icon={PackageCheck} trend={written && totalImages && written >= totalImages ? "up" : "none"} hint={totalImages ? `${written ?? 0} / ${totalImages}` : undefined} />
+          <KpiCard title="已写入" value={written ?? "—"} icon={PackageCheck} trend={written != null && totalImages != null && written >= totalImages ? "up" : "none"} hint={totalImages ? `${written ?? 0} / ${totalImages}` : undefined} />
           <KpiCard title="总耗时" value={formatSeconds(elapsed)} icon={Clock} />
           <KpiCard title="推理设备" value={gpu} icon={Cpu} hint={summary.providers?.join(", ")} />
         </div>

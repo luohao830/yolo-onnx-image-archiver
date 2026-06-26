@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,9 @@ from backend.services.event_bus import EventBus
 from backend.services.job_service import build_job_event, normalize_job_payload
 from backend.services.runtime_paths import RuntimePaths
 from backend.workers.gpu_gate import GpuGate
-from backend.workers.progress_writer import ProgressEventWriter  # noqa: F401 — 向后兼容再导出
+from backend.workers.progress_writer import ProgressEventWriter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,11 +82,15 @@ class TaskRunner:
 
         # 重新获取可重读字段（新 session）
         with session_scope(self.engine) as session:
-            job = JobRepository(session).get(job_id)
-            model_id = getattr(job, "model_id", None)
-            input_path = getattr(job, "input_path", None)
-            payload_json = getattr(job, "payload_json", None)
+            job_repo = JobRepository(session)
+            job = job_repo.get(job_id)
+            model_id = job.model_id
+            input_path = job.input_path
+            payload_json = job.payload_json
             job_code = job.job_code
+            if job.cancel_requested:
+                self._mark_canceled(job_id)
+                return
             if model_id is not None:
                 try:
                     model_onnx = ModelRepository(session).get(model_id).onnx_path
@@ -124,55 +131,106 @@ class TaskRunner:
                     progress_callback=progress_writer,
                     detection_callback=_detection_callback,
                 )
+            result_out_dir = summary.get("out_dir")
+            if result_out_dir is None:
+                self._fast_fail(job_id, "inference summary missing out_dir")
+                return
             if detections:
-                inference_adapter.write_detections_json(Path(summary["out_dir"]), detections)
-            zip_path = inference_adapter.package_job_output(Path(summary["out_dir"]))
+                inference_adapter.write_detections_json(Path(result_out_dir), detections)
+            zip_path = inference_adapter.package_job_output(Path(result_out_dir))
         except Exception as exc:  # noqa: BLE001
             error_message = str(exc) or exc.__class__.__name__
             self._fast_fail(job_id, error_message)
             return
 
-        # ── 阶段 3：写终态 ──────────────────────────────────────
-        completed_record_id: int | None = None
+        # ── 阶段 3：写终态（先检查取消标记）──────────────────────
+        terminal_event: dict[str, Any] | None = None
+        terminal_record_id: int | None = None
         with session_scope(self.engine) as session:
             job_repo = JobRepository(session)
-            summary_json = inference_adapter.build_job_summary_json(summary)
-            job_repo.update_summary(job_id, summary_json=summary_json)
-            job_repo.mark_completed(
-                job_id,
-                result_dir=str(summary["out_dir"]),
-                result_zip_path=str(zip_path),
-            )
-            completed_event = build_job_event(
-                event_type="completed",
-                message="任务执行完成",
-                payload_json={
-                    "result_dir": str(summary["out_dir"]),
-                    "result_zip_path": str(zip_path),
-                    "total": summary.get("total"),
-                    "written": summary.get("written"),
-                    "detections_ready": bool(detections),
-                },
-            )
-            record = job_repo.record_event(job_id, **completed_event)
-            completed_record_id = getattr(record, "id", None)
+            job = job_repo.get(job_id)
+            # 推理期间用户可能已请求取消
+            if job.cancel_requested:
+                job_repo.mark_canceled(job_id)
+                terminal_event = build_job_event(
+                    event_type="canceled",
+                    message="任务已被取消",
+                    payload_json={"result_dir": str(result_out_dir)},
+                )
+                record = job_repo.record_event(job_id, **terminal_event)
+                terminal_record_id = getattr(record, "id", None)
+            else:
+                summary_json = inference_adapter.build_job_summary_json(summary)
+                job_repo.update_summary(job_id, summary_json=summary_json)
+                job_repo.mark_completed(
+                    job_id,
+                    result_dir=str(result_out_dir),
+                    result_zip_path=str(zip_path),
+                )
+                terminal_event = build_job_event(
+                    event_type="completed",
+                    message="任务执行完成",
+                    payload_json={
+                        "result_dir": str(result_out_dir),
+                        "result_zip_path": str(zip_path),
+                        "total": summary.get("total"),
+                        "written": summary.get("written"),
+                        "detections_ready": bool(detections),
+                    },
+                )
+                record = job_repo.record_event(job_id, **terminal_event)
+                terminal_record_id = getattr(record, "id", None)
 
-        self._publish_event(job_id, completed_event, record_id=completed_record_id)
+        if terminal_event is not None:
+            self._publish_event(job_id, terminal_event, record_id=terminal_record_id)
 
     def _fast_fail(self, job_id: int, error_message: str) -> None:
         failed_record_id: int | None = None
-        with session_scope(self.engine) as session:
-            job_repo = JobRepository(session)
-            job_repo.mark_failed(job_id, error_message=error_message)
+        try:
+            with session_scope(self.engine) as session:
+                job_repo = JobRepository(session)
+                job_repo.mark_failed(job_id, error_message=error_message)
+                failed_event = build_job_event(
+                    event_type="failed",
+                    message="任务执行失败",
+                    payload_json={"error": error_message},
+                )
+                record = job_repo.record_event(job_id, **failed_event)
+                failed_record_id = getattr(record, "id", None)
+        except Exception as db_exc:  # noqa: BLE001
+            logger.error("_fast_fail DB write failed for job %s: %s", job_id, db_exc)
+            # DB 写入失败时尽力尝试一次不带 record_id 的 SSE 发布
             failed_event = build_job_event(
                 event_type="failed",
                 message="任务执行失败",
                 payload_json={"error": error_message},
             )
-            record = job_repo.record_event(job_id, **failed_event)
-            failed_record_id = getattr(record, "id", None)
 
         self._publish_event(job_id, failed_event, record_id=failed_record_id)
+
+    def _mark_canceled(self, job_id: int) -> None:
+        """阶段 2 期间取消标记已被设置，终止任务。"""
+        terminal_record_id: int | None = None
+        try:
+            with session_scope(self.engine) as session:
+                job_repo = JobRepository(session)
+                job_repo.mark_canceled(job_id)
+                canceled_event = build_job_event(
+                    event_type="canceled",
+                    message="任务已被取消",
+                    payload_json={},
+                )
+                record = job_repo.record_event(job_id, **canceled_event)
+                terminal_record_id = getattr(record, "id", None)
+        except Exception as db_exc:  # noqa: BLE001
+            logger.error("_mark_canceled DB write failed for job %s: %s", job_id, db_exc)
+            canceled_event = build_job_event(
+                event_type="canceled",
+                message="任务已被取消",
+                payload_json={},
+            )
+
+        self._publish_event(job_id, canceled_event, record_id=terminal_record_id)
 
     def _publish_event(self, job_id: int, event: dict[str, Any], record_id: int | None = None) -> None:
         if self.event_bus is None:
@@ -186,5 +244,7 @@ class TaskRunner:
         }
         try:
             self.event_bus.publish(f"job:{job_id}", payload)
+        except RuntimeError:
+            logger.warning("SSE publish skipped for job %s: event loop closed", job_id)
         except Exception:  # noqa: BLE001
-            pass
+            logger.warning("SSE publish failed for job %s", job_id, exc_info=True)

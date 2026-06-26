@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { buildJobImageUrl, type JobDetection } from "../../api/client";
 import { cn } from "../../lib/utils";
@@ -29,8 +29,13 @@ export function DetectionImageViewer({
     () => (onlyDrawn ? detections.filter((d) => d.has_drawn) : detections),
     [detections, onlyDrawn],
   );
+
+  // 当图片列表变化时重置索引，防止越界
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [images]);
+
   const [activeIdx, setActiveIdx] = useState(0);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   if (images.length === 0) {
     return (
@@ -50,18 +55,25 @@ export function DetectionImageViewer({
           src={activeSrc}
           alt={active.filename}
           className="block max-h-[520px] w-full object-contain"
+          onError={(e) => {
+            const img = e.currentTarget;
+            if (!img.dataset.retry) {
+              img.dataset.retry = "1";
+              img.src = activeSrc;
+            }
+          }}
         />
         <svg
           viewBox={`0 0 ${active.width || 1} ${active.height || 1}`}
-          preserveAspectRatio="none"
+          preserveAspectRatio="xMidYMid meet"
           className="pointer-events-none absolute inset-0 h-full w-full"
           aria-label="检测框叠层"
         >
-          {active.detections.map((det, i) => {
+          {active.detections.map((det) => {
             const style = confidenceStyle(det.confidence);
-            const isHover = hoverIdx === i;
+            const key = `${det.label}-${det.bbox.join(",")}-${det.confidence.toFixed(4)}`;
             return (
-              <g key={i}>
+              <g key={key}>
                 <rect
                   x={det.bbox[0]}
                   y={det.bbox[1]}
@@ -69,21 +81,10 @@ export function DetectionImageViewer({
                   height={Math.max(0, det.bbox[3] - det.bbox[1])}
                   fill="none"
                   stroke={style.stroke}
-                  strokeWidth={isHover ? 4 : 2}
+                  strokeWidth={2}
                   strokeDasharray={style.dash}
-                  opacity={isHover ? 1 : 0.85}
+                  opacity={0.85}
                 />
-                {isHover ? (
-                  <text
-                    x={det.bbox[0]}
-                    y={Math.max(12, det.bbox[1] - 4)}
-                    fill={style.stroke}
-                    fontSize={Math.max(12, (active.width || 1) * 0.02)}
-                    fontWeight="bold"
-                  >
-                    {det.label} {(det.confidence * 100).toFixed(0)}%
-                  </text>
-                ) : null}
               </g>
             );
           })}
@@ -123,7 +124,6 @@ export function DetectionImageViewer({
             <li key={`${img.filename}-${idx}`}>
               <button
                 type="button"
-                onMouseEnter={() => setHoverIdx(null)}
                 onClick={() => setActiveIdx(idx)}
                 className={cn(
                   "flex flex-col gap-1 rounded-md border p-1 text-left transition-colors",

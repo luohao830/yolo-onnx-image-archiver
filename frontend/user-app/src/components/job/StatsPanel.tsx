@@ -47,7 +47,7 @@ export function StatsPanel({ summary, detections }: StatsPanelProps) {
     }
     return buckets;
   }, [detections]);
-  const confTotal = confBuckets.high + confBuckets.mid + confBuckets.low || 1;
+  const confTotal = confBuckets.high + confBuckets.mid + confBuckets.low;
 
   return (
     <Card>
@@ -56,7 +56,7 @@ export function StatsPanel({ summary, detections }: StatsPanelProps) {
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <div className="grid grid-cols-3 gap-2">
-          <KpiCard title="总图数" value={summary?.total ?? detections.length ?? "—"} />
+          <KpiCard title="总图数" value={summary?.total ?? detections.length} />
           <KpiCard title="检测图" value={detectedCount} />
           <KpiCard title="无检测" value={emptyCount} />
         </div>
