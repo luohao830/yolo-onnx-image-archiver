@@ -58,6 +58,8 @@ class JobRepository:
         model_id: int | None = None,
     ) -> JobRecord:
         job = self._get_required(job_id)
+        if job.status != "created":
+            raise ValueError("job has already been uploaded or started")
         job.status = "uploaded"
         job.input_path = input_path
         if model_id is not None:
@@ -68,6 +70,8 @@ class JobRepository:
 
     def mark_running(self, job_id: int) -> JobRecord:
         job = self._get_required(job_id)
+        if job.status not in ("created", "uploaded"):
+            raise ValueError(f"job cannot be started from status {job.status}")
         job.status = "running"
         job.error_message = None
         job.cancel_requested = False

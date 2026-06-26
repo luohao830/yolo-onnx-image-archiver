@@ -5,11 +5,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from backend.core.config import settings
 from backend.services.archive_ingest import SUPPORTED_IMAGE_SUFFIXES, extract_upload_archive
 from backend.services.job_presenter import JobPresenter
 from backend.services.runtime_paths import RuntimePaths
-
-MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024 * 1024
 
 
 class UploadTooLargeError(ValueError):
@@ -17,10 +16,17 @@ class UploadTooLargeError(ValueError):
 
 
 class JobUploadStore:
-    """上传大小限制、zip 解压、单图复制、输入图片计数。"""
+    """上传大小限制、zip 解压、单图复制、输入图片计数。
+
+    上传大小上限与 gateway Nginx client_max_body_size 保持一致。
+    """
 
     def __init__(self, runtime_paths: RuntimePaths) -> None:
         self._runtime_paths = runtime_paths
+
+    @staticmethod
+    def upload_limit_bytes() -> int:
+        return 100 * 1024 * 1024 * 1024
 
     def persist_public_upload(
         self,
@@ -70,8 +76,10 @@ class JobUploadStore:
             # 无论解压/复制成功或失败，清理上传的原始文件释放磁盘空间
             raw_path.unlink(missing_ok=True)
 
-    @staticmethod
-    def _copy_upload_with_size_limit(file_obj: BinaryIO, raw_path: Path) -> int:
+    @classmethod
+    def _copy_upload_with_size_limit(cls, file_obj: BinaryIO, raw_path: Path) -> int:
+        limit = cls.upload_limit_bytes()
+        limit_gb = limit // (1024 * 1024 * 1024)
         written = 0
         try:
             with raw_path.open("wb") as dst:
@@ -80,8 +88,7 @@ class JobUploadStore:
                     if not chunk:
                         break
                     written += len(chunk)
-                    if written > MAX_UPLOAD_FILE_BYTES:
-                        limit_gb = MAX_UPLOAD_FILE_BYTES // (1024 * 1024 * 1024)
+                    if written > limit:
                         raise UploadTooLargeError(f"上传文件大小不能超过 {limit_gb}G")
                     dst.write(chunk)
         except Exception:

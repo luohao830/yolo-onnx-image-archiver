@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     admin_token_secret: str | None = None
     admin_token_ttl_seconds: int = 3600
     sse_token_ttl_seconds: int = 300
+    sse_token_secret: str | None = None
     admin_ip_whitelist: str = ""
     admin_trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
 
@@ -30,6 +31,9 @@ class Settings(BaseSettings):
 
     def resolve_admin_token_secret(self) -> str:
         return self.admin_token_secret or self.admin_secret
+
+    def resolve_sse_token_secret(self) -> str:
+        return self.sse_token_secret or self.resolve_admin_token_secret()
 
 
 settings = Settings()
