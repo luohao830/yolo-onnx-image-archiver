@@ -20,7 +20,16 @@ def create_job(
     payload: CreateJobRequest,
     service: Annotated[JobService, Depends(get_job_service)],
 ) -> JobReceipt:
-    receipt = service.create_public_job(payload.mode)
+    try:
+        receipt = service.create_public_job(
+            payload.mode,
+            model_id=payload.model_id,
+            payload=payload.payload,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return JobReceipt(**receipt)
 
 
@@ -93,3 +102,28 @@ def download_job_result(
         media_type="application/zip",
         filename=f"{job_code}.zip",
     )
+
+
+@router.get("/{job_code}/detections")
+def get_job_detections(
+    job_code: str,
+    access_token: str,
+    service: Annotated[JobService, Depends(get_job_service)],
+) -> dict:
+    detections = service.get_public_detections(job_code, access_token)
+    if detections is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="detections not found")
+    return detections
+
+
+@router.get("/{job_code}/images/{file_path:path}")
+def get_job_image(
+    job_code: str,
+    access_token: str,
+    file_path: str,
+    service: Annotated[JobService, Depends(get_job_service)],
+) -> FileResponse:
+    resolved = service.resolve_public_result_image(job_code, access_token, file_path)
+    if resolved is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image not found")
+    return FileResponse(path=resolved)

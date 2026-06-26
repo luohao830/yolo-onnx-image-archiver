@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
 import { listPublishedModels } from "../../api/client";
@@ -20,7 +21,11 @@ describe("AdvancedModePage", () => {
       }
     ]);
 
-    render(<AdvancedModePage />);
+    render(
+      <MemoryRouter>
+        <AdvancedModePage />
+      </MemoryRouter>,
+    );
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "选择模型并查看处理过程" })).toBeTruthy();

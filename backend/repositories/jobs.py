@@ -97,6 +97,12 @@ class JobRepository:
         self.session.flush()
         return job
 
+    def update_summary(self, job_id: int, *, summary_json: dict[str, Any]) -> JobRecord:
+        job = self._get_required(job_id)
+        job.summary_json = summary_json
+        self.session.flush()
+        return job
+
     def mark_canceled(self, job_id: int) -> JobRecord:
         job = self._get_required(job_id)
         job.status = "canceled"
@@ -117,6 +123,7 @@ class JobRepository:
         job.error_message = None
         job.result_dir = None
         job.result_zip_path = None
+        job.summary_json = None
         self.session.flush()
         return job
 

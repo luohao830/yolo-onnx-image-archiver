@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from backend.api.routes.admin_jobs import cancel_job, download_job_result, get_job_detail, list_jobs, retry_job
+import pytest
+from fastapi import HTTPException
+
+from backend.api.routes.admin_jobs import (
+    cancel_job,
+    download_job_result,
+    get_job_detail,
+    issue_job_events_token,
+    list_jobs,
+    retry_job,
+)
+from backend.core.admin_auth import AdminTokenError, AdminTokenService
 from backend.core.db import build_engine, create_all, session_scope
 from backend.db.models import JobRecord
 from backend.main import app
@@ -59,6 +70,48 @@ def test_admin_can_get_job_detail_with_events_and_download_state(tmp_path: Path)
     assert detail.result_zip_available is True
     assert detail.events[0].message == "输出结果压缩包已生成"
     assert detail.events[0].payload_json == {"total": 2, "written": 2}
+
+
+def test_admin_can_issue_job_events_token(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+    token_service = AdminTokenService("test-secret")
+
+    with session_scope(engine) as session:
+        repo = JobRepository(session)
+        job = repo.create_job(job_code="JOB-SSE", access_token_hash="hash", mode="advanced")
+        job_id = job.id
+
+    response = issue_job_events_token(
+        job_id,
+        admin=ADMIN_CLAIMS,
+        service=service,
+        token_service=token_service,
+    )
+
+    claims = token_service.verify_sse(response.token, job_id)
+    assert claims["role"] == "admin"
+    assert claims["purpose"] == "job-events"
+    assert claims["job_id"] == job_id
+    with pytest.raises(AdminTokenError):
+        token_service.verify_sse(response.token, job_id + 1)
+
+
+def test_admin_job_events_token_returns_404_for_missing_job(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'app.db'}")
+    create_all(engine)
+    service = JobService(engine)
+
+    with pytest.raises(HTTPException) as error:
+        issue_job_events_token(
+            404,
+            admin=ADMIN_CLAIMS,
+            service=service,
+            token_service=AdminTokenService("test-secret"),
+        )
+
+    assert error.value.status_code == 404
 
 
 def test_admin_can_download_completed_job_result(tmp_path: Path) -> None:
@@ -158,6 +211,8 @@ def test_openapi_contains_admin_job_routes() -> None:
     assert "post" in schema["paths"]["/api/admin/jobs/{job_id}/cancel"]
     assert "/api/admin/jobs/{job_id}/retry" in schema["paths"]
     assert "post" in schema["paths"]["/api/admin/jobs/{job_id}/retry"]
+    assert "/api/admin/jobs/{job_id}/events-token" in schema["paths"]
+    assert "post" in schema["paths"]["/api/admin/jobs/{job_id}/events-token"]
     assert "/api/admin/jobs/{job_id}" in schema["paths"]
     assert "get" in schema["paths"]["/api/admin/jobs/{job_id}"]
     assert "/api/admin/jobs/{job_id}/download" in schema["paths"]

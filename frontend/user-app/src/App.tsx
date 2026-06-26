@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 
+import { AdminSidebar } from "./components/layout/AdminSidebar";
 import { AdvancedModePage } from "./pages/AdvancedModePage";
 import { HomePage } from "./pages/HomePage";
 import { PersonFilterPage } from "./pages/PersonFilterPage";
@@ -19,23 +20,17 @@ interface AdminLayoutProps {
 
 function AdminLayout({ onLogout }: AdminLayoutProps) {
   return (
-    <main className="admin-shell">
-      <nav aria-label="后台导航">
-        <Link to="/">返回上传页</Link>
-        <Link to="/admin/models">模型管理</Link>
-        <Link to="/admin/configs">系统配置</Link>
-        <Link to="/admin/jobs">任务监控</Link>
-        <button className="nav-logout" type="button" onClick={onLogout}>
-          登出
-        </button>
-      </nav>
-      <Routes>
-        <Route path="models" element={<ModelsPage />} />
-        <Route path="configs" element={<ConfigsPage />} />
-        <Route path="jobs" element={<JobsPage />} />
-        <Route path="*" element={<Navigate to="/admin/configs" replace />} />
-      </Routes>
-    </main>
+    <div className="flex min-h-screen bg-page">
+      <AdminSidebar onLogout={onLogout} />
+      <main className="flex-1 overflow-auto">
+        <Routes>
+          <Route path="models" element={<ModelsPage />} />
+          <Route path="configs" element={<ConfigsPage />} />
+          <Route path="jobs" element={<JobsPage />} />
+          <Route path="*" element={<Navigate to="/admin/configs" replace />} />
+        </Routes>
+      </main>
+    </div>
   );
 }
 
