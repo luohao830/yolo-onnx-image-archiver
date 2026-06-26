@@ -59,7 +59,7 @@ class JobRepository:
     ) -> JobRecord:
         job = self._get_required(job_id)
         if job.status != "created":
-            raise ValueError("job has already been uploaded or started")
+            raise ValueError(f"job cannot be uploaded from status {job.status}")
         job.status = "uploaded"
         job.input_path = input_path
         if model_id is not None:
