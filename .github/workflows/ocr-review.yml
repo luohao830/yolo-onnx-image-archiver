@@ -104,10 +104,10 @@ jobs:
           # 配置思考强度：Anthropic 使用 thinking 格式，其他 OpenAI 兼容接口使用 reasoning_effort
           if [ -n "${OCR_LLM_REASONING_EFFORT}" ]; then
             if [ "${OCR_LLM_USE_ANTHROPIC}" = "true" ]; then
-              echo "使用 Anthropic Claude 思考模式配置：budget_tokens=${OCR_LLM_REASONING_EFFORT}"
+              echo "使用 Anthropic Claude 思考模式配置（budget_tokens 已配置）"
               ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": ${OCR_LLM_REASONING_EFFORT}}}"
             else
-              echo "使用 OpenAI 思考模式配置：reasoning_effort=${OCR_LLM_REASONING_EFFORT}"
+              echo "使用 OpenAI 思考模式配置（reasoning_effort 已配置）"
               ocr config set llm.extra_body "{\"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
             fi
           else
