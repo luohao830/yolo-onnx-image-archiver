@@ -105,6 +105,10 @@ jobs:
           if [ -n "${OCR_LLM_REASONING_EFFORT}" ]; then
             if [ "${OCR_LLM_USE_ANTHROPIC}" = "true" ]; then
               echo "使用 Anthropic Claude 思考模式配置（budget_tokens 已配置）"
+              if ! [[ "${OCR_LLM_REASONING_EFFORT}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+                echo "错误：OCR_LLM_REASONING_EFFORT 在 Anthropic 模式下必须为不含前导零的纯数字（budget_tokens）"
+                exit 1
+              fi
               ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": ${OCR_LLM_REASONING_EFFORT}}}"
             else
               echo "使用 OpenAI 思考模式配置（reasoning_effort 已配置）"
