@@ -112,6 +112,10 @@ jobs:
               ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": ${OCR_LLM_REASONING_EFFORT}}}"
             else
               echo "使用 OpenAI 思考模式配置（reasoning_effort 已配置）"
+              if ! [[ "${OCR_LLM_REASONING_EFFORT}" =~ ^(low|medium|high|xhigh)$ ]]; then
+                echo "错误：OCR_LLM_REASONING_EFFORT 在 OpenAI 兼容模式下必须为 low、medium、high 或 xhigh"
+                exit 1
+              fi
               ocr config set llm.extra_body "{\"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
             fi
           else
