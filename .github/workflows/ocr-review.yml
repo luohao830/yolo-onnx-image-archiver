@@ -96,14 +96,13 @@ jobs:
           if [ -n "${OCR_LLM_MODEL}" ]; then
             ocr config set llm.model "${OCR_LLM_MODEL}"
           fi
-          if [ -n "${OCR_LLM_USE_ANTHROPIC}" ]; then
-            ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC}"
-          fi
+          OCR_LLM_USE_ANTHROPIC_VALUE="${OCR_LLM_USE_ANTHROPIC:-false}"
+          ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC_VALUE}"
           ocr config set language Chinese
 
-          # 配置思考强度：Anthropic 使用 thinking 格式，其他 OpenAI 兼容接口使用 reasoning_effort
+          # 配置思考强度：Anthropic 使用 thinking 格式，其他 OpenAI 兼容接口使用 thinking + reasoning_effort
           if [ -n "${OCR_LLM_REASONING_EFFORT}" ]; then
-            if [ "${OCR_LLM_USE_ANTHROPIC}" = "true" ]; then
+            if [ "${OCR_LLM_USE_ANTHROPIC_VALUE}" = "true" ]; then
               echo "使用 Anthropic Claude 思考模式配置（budget_tokens 已配置）"
               if ! [[ "${OCR_LLM_REASONING_EFFORT}" =~ ^(0|[1-9][0-9]*)$ ]]; then
                 echo "错误：OCR_LLM_REASONING_EFFORT 在 Anthropic 模式下必须为不含前导零的纯数字（budget_tokens）"
@@ -116,7 +115,7 @@ jobs:
                 echo "错误：OCR_LLM_REASONING_EFFORT 在 OpenAI 兼容模式下必须为 low、medium、high 或 xhigh"
                 exit 1
               fi
-              ocr config set llm.extra_body "{\"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
+              ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\"}, \"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
             fi
           else
             echo "未配置思考强度，使用默认值（禁用 thinking 模式）"
