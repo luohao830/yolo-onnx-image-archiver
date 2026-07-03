@@ -41,8 +41,10 @@ class JobEventsTokenService:
         try:
             payload = self.serializer.loads(token, max_age=self.ttl_seconds)
         except SignatureExpired as exc:
+            logger.warning("Job events token expired for job_id=%s", job_id)
             raise JobEventsTokenError("job events token expired") from exc
         except BadSignature as exc:
+            logger.warning("Invalid job events token signature for job_id=%s", job_id)
             raise JobEventsTokenError("invalid job events token") from exc
 
         if not isinstance(payload, dict) or payload.get("purpose") != "public-job-events":
@@ -50,6 +52,7 @@ class JobEventsTokenService:
         if not isinstance(payload.get("job_id"), int):
             raise JobEventsTokenError("invalid job events token")
         if job_id is not None and payload.get("job_id") != job_id:
+            logger.warning("Job events token job_id mismatch: token=%s expected=%s", payload.get("job_id"), job_id)
             raise JobEventsTokenError("invalid job events token")
         return dict(payload)
 
