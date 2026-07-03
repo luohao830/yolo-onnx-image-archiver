@@ -237,16 +237,18 @@ cd frontend/user-app && npm run build
 | `OCR_LLM_URL` | **是** | 无 | LLM API 地址，OpenAI 兼容格式，例如 `https://api.openai.com/v1/chat/completions` |
 | `OCR_LLM_AUTH_TOKEN` | **是** | 无 | LLM API 认证 Token |
 | `OCR_LLM_MODEL` | 否 | `gpt-4o` | 模型名称 |
-| `OCR_LLM_USE_ANTHROPIC` | 否 | 空 / `false` | 使用 Anthropic Claude 模型时设为 `true`，会影响思考强度参数格式 |
+| `OCR_LLM_USE_ANTHROPIC` | 否 | `false` | 使用 Anthropic Claude 模型时设为 `true`，未配置时 workflow 会显式使用 OpenAI 兼容协议 |
 | `OCR_LLM_REASONING_EFFORT` | 否 | 空 | 控制 LLM 思考强度。OpenAI 兼容模式可填 `low` / `medium` / `high` / `xhigh`；Anthropic Claude 模式可填数字表示 `budget_tokens`，例如 `16000` |
 
 ### 思考强度配置说明
 
 - 未配置 `OCR_LLM_REASONING_EFFORT` 时，默认禁用 thinking 模式。
+- 未配置 `OCR_LLM_USE_ANTHROPIC` 时，workflow 会显式写入 `llm.use_anthropic=false`，使用 OpenAI 兼容协议。
 - 当 `OCR_LLM_USE_ANTHROPIC` 为 `true` 时，`OCR_LLM_REASONING_EFFORT` 会作为 Claude 的 `thinking.budget_tokens` 传入（需为数字）。
-- 当 `OCR_LLM_USE_ANTHROPIC` 为空或 `false` 时，`OCR_LLM_REASONING_EFFORT` 会作为 OpenAI 兼容接口的 `reasoning_effort` 传入（可填 `low` / `medium` / `high` / `xhigh`）。
+- 当 `OCR_LLM_USE_ANTHROPIC` 为空或 `false` 时，`OCR_LLM_REASONING_EFFORT` 会作为 OpenAI 兼容接口的 `reasoning_effort` 传入，并同步写入 `thinking.type=enabled`（可填 `low` / `medium` / `high` / `xhigh`）。
 
 配置示例：
 
 - OpenAI `o3` / `o1` 系列：`OCR_LLM_REASONING_EFFORT=low`
+- DeepSeek / CPA OpenAI 兼容接口：`OCR_LLM_USE_ANTHROPIC=false`，`OCR_LLM_MODEL=deepseek-v4-pro`，`OCR_LLM_REASONING_EFFORT=xhigh`
 - Anthropic Claude：`OCR_LLM_USE_ANTHROPIC=true`，`OCR_LLM_REASONING_EFFORT=16000`
