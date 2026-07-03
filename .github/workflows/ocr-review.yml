@@ -14,9 +14,13 @@
 # 可选 Variables（推荐）或 Secrets：
 #   OCR_LLM_MODEL      - 模型名称（默认 gpt-4o）
 #   OCR_LLM_USE_ANTHROPIC - 使用 Anthropic Claude 模型时设为 'true'
+#   OCR_LLM_REASONING_EFFORT - OpenAI 兼容协议下的思考强度，取值 low/medium/high/xhigh；
+#                              留空时默认关闭思考模式（与官方示例一致）。
 #
-# 说明：默认通过 llm.extra_body='{"thinking": {"type": "disabled"}}' 禁用思考模式，
-#       以兼容各类 LLM 供应商（与官方示例 ocr-review.yml 一致）。
+# 说明：默认通过 llm.extra_body='{"enable_thinking": false}' 禁用思考模式，
+#       以兼容各类 LLM 供应商（与官方示例 ocr-review.yml 一致）；
+#       当配置了 OCR_LLM_REASONING_EFFORT 时，自动切换为
+#       '{"enable_thinking": true, "reasoning_effort": "<强度>"}' 以启用思考。
 
 name: OpenCodeReview PR Review
 
@@ -88,6 +92,7 @@ jobs:
           OCR_LLM_AUTH_TOKEN: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
           OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL || secrets.OCR_LLM_MODEL }}
           OCR_LLM_USE_ANTHROPIC: ${{ vars.OCR_LLM_USE_ANTHROPIC || secrets.OCR_LLM_USE_ANTHROPIC }}
+          OCR_LLM_REASONING_EFFORT: ${{ vars.OCR_LLM_REASONING_EFFORT || secrets.OCR_LLM_REASONING_EFFORT }}
         run: |
           if [ -z "${OCR_LLM_URL}" ] || [ -z "${OCR_LLM_AUTH_TOKEN}" ]; then
             echo "错误：OCR_LLM_URL 和 OCR_LLM_AUTH_TOKEN 为必填项，请检查仓库 Secrets 配置。"
@@ -101,8 +106,15 @@ jobs:
           OCR_LLM_USE_ANTHROPIC_VALUE="${OCR_LLM_USE_ANTHROPIC:-false}"
           ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC_VALUE}"
           ocr config set language Chinese
-          # 默认禁用思考模式，兼容各类 LLM 供应商（与官方示例一致）
-          ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
+          # 思考模式：配置了思考强度则启用，否则与官方示例一致默认关闭
+          case "${OCR_LLM_REASONING_EFFORT}" in
+            low|medium|high|xhigh)
+              ocr config set llm.extra_body "{\"enable_thinking\": true, \"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
+              ;;
+            *)
+              ocr config set llm.extra_body '{"enable_thinking": false}'
+              ;;
+          esac
 
       - name: 运行 OpenCodeReview
         id: review

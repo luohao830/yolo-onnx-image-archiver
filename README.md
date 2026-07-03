@@ -238,8 +238,10 @@ cd frontend/user-app && npm run build
 | `OCR_LLM_AUTH_TOKEN` | Secret | **是** | 无 | LLM API 认证 Token |
 | `OCR_LLM_MODEL` | Variable | 否 | `gpt-4o` | 模型名称 |
 | `OCR_LLM_USE_ANTHROPIC` | Variable | 否 | `false` | 使用 Anthropic Claude 模型时设为 `true`，未配置时 workflow 会显式使用 OpenAI 兼容协议 |
+| `OCR_LLM_REASONING_EFFORT` | Variable | 否 | 无 | OpenAI 兼容协议下的思考强度，取值 `low`/`medium`/`high`/`xhigh`；留空时默认关闭思考模式 |
 
 ### 思考模式说明
 
-- workflow 默认通过 `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'` 禁用思考模式，以兼容各类 LLM 供应商（与官方 `alibaba/open-code-review` 示例 `ocr-review.yml` 一致）。
-- 官方文档与示例未提供 `OCR_LLM_REASONING_EFFORT`、`reasoning_effort`、`OCR_DEBUG` 等思考强度配置项；如需启用思考模式，请参考官方文档自行调整 `llm.extra_body`。
+- workflow 默认通过 `ocr config set llm.extra_body '{"enable_thinking": false}'` 禁用思考模式，以兼容各类 LLM 供应商（与官方 `alibaba/open-code-review` 示例 `ocr-review.yml` 一致）。
+- 当配置了 `OCR_LLM_REASONING_EFFORT`（取值 `low`/`medium`/`high`/`xhigh`）时，workflow 自动切换为 `ocr config set llm.extra_body '{"enable_thinking": true, "reasoning_effort": "<强度>"}'` 启用思考模式；无需修改 workflow 即可按需开启思考。
+- 思考模式配置不会出现在运行日志中。
