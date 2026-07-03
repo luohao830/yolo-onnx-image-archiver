@@ -101,15 +101,6 @@ jobs:
           ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC_VALUE}"
           ocr config set language Chinese
 
-          format_reasoning_effort_for_log() {
-            case "$1" in
-              low) printf "LOW" ;;
-              medium) printf "MEDIUM" ;;
-              high) printf "HIGH" ;;
-              xhigh) printf "X-HIGH" ;;
-            esac
-          }
-
           format_budget_tokens_for_log() {
             local value="$1"
             local display=""
@@ -136,15 +127,16 @@ jobs:
               echo "思考配置：thinking.type=enabled，budget_tokens=${budget_tokens_for_log}"
               ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": ${OCR_LLM_REASONING_EFFORT}}}"
             else
-              echo "使用 OpenAI 思考模式配置（reasoning_effort 已配置）"
-              if ! [[ "${OCR_LLM_REASONING_EFFORT}" =~ ^(low|medium|high|xhigh)$ ]]; then
+              # OpenAI 兼容模式：reasoning_effort 仅接受小写值，强制转小写以兼容大小写混合配置
+              REASONING_EFFORT_VALUE="${OCR_LLM_REASONING_EFFORT,,}"
+              if ! [[ "${REASONING_EFFORT_VALUE}" =~ ^(low|medium|high|xhigh)$ ]]; then
                 echo "错误：OCR_LLM_REASONING_EFFORT 在 OpenAI 兼容模式下必须为 low、medium、high 或 xhigh"
                 exit 1
               fi
-              reasoning_effort_for_log="$(format_reasoning_effort_for_log "${OCR_LLM_REASONING_EFFORT}")"
+              echo "使用 OpenAI 思考模式配置（reasoning_effort 已配置）"
               echo "思考模式：enabled"
-              echo "思考配置：thinking.type=enabled，reasoning_effort=${reasoning_effort_for_log}"
-              ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\"}, \"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
+              echo "思考配置：thinking.type=enabled，reasoning_effort=${REASONING_EFFORT_VALUE}"
+              ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\"}, \"reasoning_effort\": \"${REASONING_EFFORT_VALUE}\"}"
             fi
           else
             echo "未配置思考强度，使用默认值（禁用 thinking 模式）"
