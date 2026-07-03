@@ -122,6 +122,7 @@ def _is_trusted_proxy_client(client_ip: str) -> bool:
 
 
 def _configured_admin_ip_whitelist() -> list[str]:
+    """解析管理员 IP 白名单配置，返回去空白后的 IP/CIDR 列表。"""
     return [
         item.strip()
         for item in settings.admin_ip_whitelist.split(",")
@@ -130,6 +131,7 @@ def _configured_admin_ip_whitelist() -> list[str]:
 
 
 def _configured_admin_trusted_proxy_cidrs() -> list[str]:
+    """解析受信任代理 CIDR 配置，返回去空白后的 CIDR 列表。"""
     return [
         item.strip()
         for item in settings.admin_trusted_proxy_cidrs.split(",")
