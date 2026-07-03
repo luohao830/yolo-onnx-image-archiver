@@ -228,17 +228,17 @@ cd frontend/user-app && npm run build
 
 本仓库已接入 [OpenCodeReview](https://github.com/alibaba/open-code-review) GitHub Actions 工作流（`.github/workflows/ocr-review.yml`）。PR 打开、推送新提交或重新打开时，会自动运行代码审查并在 PR 上发布中文行内评论与汇总结论。也可以在 PR 评论中发送 `@open-code-review` 或 `/open-code-review` 手动触发重新审查。
 
-### 配置 Secrets
+### 配置 Secrets / Variables
 
-在仓库 **Settings → Secrets and variables → Actions → Repository secrets** 中添加以下配置：
+在仓库 **Settings → Secrets and variables → Actions** 中添加以下配置。敏感项放在 **Repository secrets**，非敏感项建议放在 **Repository variables**；workflow 会优先读取 Variables，并兼容读取同名 Secrets。
 
-| Secret | 是否必需 | 默认值 | 说明 |
-|--------|---------|--------|------|
-| `OCR_LLM_URL` | **是** | 无 | LLM API 地址，OpenAI 兼容格式，例如 `https://api.openai.com/v1/chat/completions` |
-| `OCR_LLM_AUTH_TOKEN` | **是** | 无 | LLM API 认证 Token |
-| `OCR_LLM_MODEL` | 否 | `gpt-4o` | 模型名称 |
-| `OCR_LLM_USE_ANTHROPIC` | 否 | `false` | 使用 Anthropic Claude 模型时设为 `true`，未配置时 workflow 会显式使用 OpenAI 兼容协议 |
-| `OCR_LLM_REASONING_EFFORT` | 否 | 空 | 控制 LLM 思考强度。OpenAI 兼容模式可填 `low` / `medium` / `high` / `xhigh`；Anthropic Claude 模式可填数字表示 `budget_tokens`，例如 `16000` |
+| 名称 | 推荐配置位置 | 是否必需 | 默认值 | 说明 |
+|------|--------------|---------|--------|------|
+| `OCR_LLM_URL` | Secret | **是** | 无 | LLM API 地址，OpenAI 兼容格式，例如 `https://api.openai.com/v1/chat/completions` |
+| `OCR_LLM_AUTH_TOKEN` | Secret | **是** | 无 | LLM API 认证 Token |
+| `OCR_LLM_MODEL` | Variable | 否 | `gpt-4o` | 模型名称 |
+| `OCR_LLM_USE_ANTHROPIC` | Variable | 否 | `false` | 使用 Anthropic Claude 模型时设为 `true`，未配置时 workflow 会显式使用 OpenAI 兼容协议 |
+| `OCR_LLM_REASONING_EFFORT` | Variable | 否 | 空 | 控制 LLM 思考强度。OpenAI 兼容模式可填 `low` / `medium` / `high` / `xhigh`；Anthropic Claude 模式可填数字表示 `budget_tokens`，例如 `16000` |
 
 ### 思考强度配置说明
 
@@ -246,6 +246,7 @@ cd frontend/user-app && npm run build
 - 未配置 `OCR_LLM_USE_ANTHROPIC` 时，workflow 会显式写入 `llm.use_anthropic=false`，使用 OpenAI 兼容协议。
 - 当 `OCR_LLM_USE_ANTHROPIC` 为 `true` 时，`OCR_LLM_REASONING_EFFORT` 会作为 Claude 的 `thinking.budget_tokens` 传入（需为数字）。
 - 当 `OCR_LLM_USE_ANTHROPIC` 为空或 `false` 时，`OCR_LLM_REASONING_EFFORT` 会作为 OpenAI 兼容接口的 `reasoning_effort` 传入，并同步写入 `thinking.type=enabled`（可填 `low` / `medium` / `high` / `xhigh`）。
+- 配置步骤会在 GitHub Actions 日志中输出 `thinking.type` 与可读的 `reasoning_effort` / `budget_tokens` 配置值；Secrets 的原始值仍会被 GitHub 自动脱敏，需要在 OCR 自身配置输出中显示原值时请将非敏感的 `OCR_LLM_REASONING_EFFORT` 配置为 Repository variable。
 
 配置示例：
 
