@@ -143,7 +143,7 @@ curl http://127.0.0.1:58000/api/healthz
 - Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传并解压到当前任务目录，不做 hash 复用或服务端压缩包缓存；gateway 访问日志不得记录 query string，避免 `access_token` 或短期 SSE token 落盘；修改体积、上传语义或日志格式时必须同步文档。
 - 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 gateway 覆盖写入的 `X-Real-IP`，不信任客户端传入的 `X-Forwarded-For`。
 - Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
-- OpenCodeReview workflow 默认显式写入 `llm.use_anthropic=false` 使用 OpenAI 兼容协议；设置 `OCR_LLM_REASONING_EFFORT` 且非 Anthropic 模式时，会同时写入 `thinking.type=enabled` 和 `reasoning_effort`。非敏感 OCR 配置优先读取 GitHub Actions Variables，思考配置会输出到 Actions 日志；Secrets 值仍会被 GitHub 自动脱敏。
+- OpenCodeReview workflow 默认显式写入 `llm.use_anthropic=false` 使用 OpenAI 兼容协议；通过 `llm.extra_body='{"thinking": {"type": "disabled"}}'` 禁用思考模式以兼容各类 LLM 供应商（与官方 `alibaba/open-code-review` 示例一致）；非敏感 OCR 配置优先读取 GitHub Actions Variables，Secrets 值仍会被 GitHub 自动脱敏。
 - 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
 
 ## 模型管理

@@ -238,18 +238,8 @@ cd frontend/user-app && npm run build
 | `OCR_LLM_AUTH_TOKEN` | Secret | **是** | 无 | LLM API 认证 Token |
 | `OCR_LLM_MODEL` | Variable | 否 | `gpt-4o` | 模型名称 |
 | `OCR_LLM_USE_ANTHROPIC` | Variable | 否 | `false` | 使用 Anthropic Claude 模型时设为 `true`，未配置时 workflow 会显式使用 OpenAI 兼容协议 |
-| `OCR_LLM_REASONING_EFFORT` | Variable | 否 | 空 | 控制 LLM 思考强度。OpenAI 兼容模式可填 `low` / `medium` / `high` / `xhigh`；Anthropic Claude 模式可填数字表示 `budget_tokens`，例如 `16000` |
 
-### 思考强度配置说明
+### 思考模式说明
 
-- 未配置 `OCR_LLM_REASONING_EFFORT` 时，默认禁用 thinking 模式。
-- 未配置 `OCR_LLM_USE_ANTHROPIC` 时，workflow 会显式写入 `llm.use_anthropic=false`，使用 OpenAI 兼容协议。
-- 当 `OCR_LLM_USE_ANTHROPIC` 为 `true` 时，`OCR_LLM_REASONING_EFFORT` 会作为 Claude 的 `thinking.budget_tokens` 传入（需为数字）。
-- 当 `OCR_LLM_USE_ANTHROPIC` 为空或 `false` 时，`OCR_LLM_REASONING_EFFORT` 会作为 OpenAI 兼容接口的 `reasoning_effort` 传入，并同步写入 `thinking.type=enabled`（可填 `low` / `medium` / `high` / `xhigh`）。
-- 配置步骤会在 GitHub Actions 日志中输出 `thinking.type` 与可读的 `reasoning_effort` / `budget_tokens` 配置值；Secrets 的原始值仍会被 GitHub 自动脱敏，需要在 OCR 自身配置输出中显示原值时请将非敏感的 `OCR_LLM_REASONING_EFFORT` 配置为 Repository variable。
-
-配置示例：
-
-- OpenAI `o3` / `o1` 系列：`OCR_LLM_REASONING_EFFORT=low`
-- DeepSeek / CPA OpenAI 兼容接口：`OCR_LLM_USE_ANTHROPIC=false`，`OCR_LLM_MODEL=deepseek-v4-pro`，`OCR_LLM_REASONING_EFFORT=xhigh`
-- Anthropic Claude：`OCR_LLM_USE_ANTHROPIC=true`，`OCR_LLM_REASONING_EFFORT=16000`
+- workflow 默认通过 `ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'` 禁用思考模式，以兼容各类 LLM 供应商（与官方 `alibaba/open-code-review` 示例 `ocr-review.yml` 一致）。
+- 官方文档与示例未提供 `OCR_LLM_REASONING_EFFORT`、`reasoning_effort`、`OCR_DEBUG` 等思考强度配置项；如需启用思考模式，请参考官方文档自行调整 `llm.extra_body`。
