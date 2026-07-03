@@ -155,6 +155,8 @@ jobs:
 
       - name: 运行 OpenCodeReview
         id: review
+        env:
+          OCR_DEBUG: "1"
         run: |
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             BASE_REF="${{ github.event.pull_request.base.ref }}"
