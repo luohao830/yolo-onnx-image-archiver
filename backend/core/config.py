@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     admin_trusted_proxy_cidrs: str = "127.0.0.1/32,::1/128"
 
     def resolve_runtime_root(self) -> Path:
+        """解析并返回运行时根目录的绝对路径。
+
+        当配置值为绝对路径时直接返回；否则以项目根目录为基准拼接后再解析为绝对路径。
+        """
         if self.runtime_root.is_absolute():
             return self.runtime_root
         return (PROJECT_ROOT / self.runtime_root).resolve()
