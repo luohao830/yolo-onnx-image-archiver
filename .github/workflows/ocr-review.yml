@@ -11,9 +11,10 @@
 #   OCR_LLM_URL        - LLM API 地址（OpenAI 兼容格式）
 #   OCR_LLM_AUTH_TOKEN - API 认证 Token
 #
-# 可选 Secrets：
+# 可选 Variables（推荐）或 Secrets：
 #   OCR_LLM_MODEL      - 模型名称（默认 gpt-4o）
 #   OCR_LLM_USE_ANTHROPIC - 使用 Anthropic Claude 模型时设为 'true'
+#   OCR_LLM_REASONING_EFFORT - 思考强度；日志会显示可读配置值，Secrets 原始值仍会被 GitHub 脱敏
 
 name: OpenCodeReview PR Review
 
@@ -83,9 +84,9 @@ jobs:
         env:
           OCR_LLM_URL: ${{ secrets.OCR_LLM_URL }}
           OCR_LLM_AUTH_TOKEN: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
-          OCR_LLM_MODEL: ${{ secrets.OCR_LLM_MODEL }}
-          OCR_LLM_USE_ANTHROPIC: ${{ secrets.OCR_LLM_USE_ANTHROPIC }}
-          OCR_LLM_REASONING_EFFORT: ${{ secrets.OCR_LLM_REASONING_EFFORT }}
+          OCR_LLM_MODEL: ${{ vars.OCR_LLM_MODEL || secrets.OCR_LLM_MODEL }}
+          OCR_LLM_USE_ANTHROPIC: ${{ vars.OCR_LLM_USE_ANTHROPIC || secrets.OCR_LLM_USE_ANTHROPIC }}
+          OCR_LLM_REASONING_EFFORT: ${{ vars.OCR_LLM_REASONING_EFFORT || secrets.OCR_LLM_REASONING_EFFORT }}
         run: |
           if [ -z "${OCR_LLM_URL}" ] || [ -z "${OCR_LLM_AUTH_TOKEN}" ]; then
             echo "错误：OCR_LLM_URL 和 OCR_LLM_AUTH_TOKEN 为必填项，请检查仓库 Secrets 配置。"
@@ -100,6 +101,28 @@ jobs:
           ocr config set llm.use_anthropic "${OCR_LLM_USE_ANTHROPIC_VALUE}"
           ocr config set language Chinese
 
+          format_reasoning_effort_for_log() {
+            case "$1" in
+              low) printf "LOW" ;;
+              medium) printf "MEDIUM" ;;
+              high) printf "HIGH" ;;
+              xhigh) printf "X-HIGH" ;;
+            esac
+          }
+
+          format_budget_tokens_for_log() {
+            local value="$1"
+            local display=""
+            local i
+            for ((i = 0; i < ${#value}; i++)); do
+              if [ -n "${display}" ]; then
+                display="${display} "
+              fi
+              display="${display}${value:i:1}"
+            done
+            printf "%s tokens" "${display}"
+          }
+
           # 配置思考强度：Anthropic 使用 thinking 格式，其他 OpenAI 兼容接口使用 thinking + reasoning_effort
           if [ -n "${OCR_LLM_REASONING_EFFORT}" ]; then
             if [ "${OCR_LLM_USE_ANTHROPIC_VALUE}" = "true" ]; then
@@ -108,6 +131,9 @@ jobs:
                 echo "错误：OCR_LLM_REASONING_EFFORT 在 Anthropic 模式下必须为不含前导零的纯数字（budget_tokens）"
                 exit 1
               fi
+              budget_tokens_for_log="$(format_budget_tokens_for_log "${OCR_LLM_REASONING_EFFORT}")"
+              echo "思考模式：enabled"
+              echo "思考配置：thinking.type=enabled，budget_tokens=${budget_tokens_for_log}"
               ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\", \"budget_tokens\": ${OCR_LLM_REASONING_EFFORT}}}"
             else
               echo "使用 OpenAI 思考模式配置（reasoning_effort 已配置）"
@@ -115,10 +141,15 @@ jobs:
                 echo "错误：OCR_LLM_REASONING_EFFORT 在 OpenAI 兼容模式下必须为 low、medium、high 或 xhigh"
                 exit 1
               fi
+              reasoning_effort_for_log="$(format_reasoning_effort_for_log "${OCR_LLM_REASONING_EFFORT}")"
+              echo "思考模式：enabled"
+              echo "思考配置：thinking.type=enabled，reasoning_effort=${reasoning_effort_for_log}"
               ocr config set llm.extra_body "{\"thinking\": {\"type\": \"enabled\"}, \"reasoning_effort\": \"${OCR_LLM_REASONING_EFFORT}\"}"
             fi
           else
             echo "未配置思考强度，使用默认值（禁用 thinking 模式）"
+            echo "思考模式：disabled"
+            echo "思考配置：thinking.type=disabled"
             ocr config set llm.extra_body '{"thinking": {"type": "disabled"}}'
           fi
 
