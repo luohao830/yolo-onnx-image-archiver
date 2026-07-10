@@ -10,11 +10,30 @@ SUPPORTED_IMAGE_SUFFIXES = frozenset(
     {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp", ".gif"}
 )
 
+# 防 zip 炸弹：单文件与累计解压上限。
+MAX_FILE_BYTES = 500 * 1024 * 1024
+MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+
+
+def _limited_copy(src, dst) -> int:
+    """按块复制并累计字节，超 MAX_FILE_BYTES 抛异常，返回写入字节数。"""
+    written = 0
+    while True:
+        chunk = src.read(1024 * 1024)
+        if not chunk:
+            break
+        written += len(chunk)
+        if written > MAX_FILE_BYTES:
+            raise ValueError(f"压缩包内单个文件超过 {MAX_FILE_BYTES} 字节限制")
+        dst.write(chunk)
+    return written
+
 
 def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
     """把上传的 .zip 安全解压到 out_dir，仅保留受支持的图片扩展名。
 
-    使用临时目录原子替换，避免半截解压留下脏数据。返回解压后的图片绝对路径列表。
+    使用临时目录原子替换，避免半截解压留下脏数据。防 zip 炸弹：单文件与累计解压
+    超过上限时抛异常（临时目录复用外层 except 清理）。返回解压后的图片绝对路径列表。
     """
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     resolved_out_dir = out_dir.resolve()
@@ -34,12 +53,15 @@ def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
     extracted = [out_dir / target.relative_to(resolved_out_dir) for _, target in members]
 
     try:
+        total_bytes = 0
         with zipfile.ZipFile(archive_path) as zf:
             for info, target in members:
                 temp_target = temp_out_dir / target.relative_to(resolved_out_dir)
                 temp_target.parent.mkdir(parents=True, exist_ok=True)
                 with zf.open(info) as src, temp_target.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                    total_bytes += _limited_copy(src, dst)
+                if total_bytes > MAX_TOTAL_BYTES:
+                    raise ValueError(f"压缩包累计解压超过 {MAX_TOTAL_BYTES} 字节限制")
         _replace_output_dir(temp_out_dir, out_dir)
     except Exception:
         shutil.rmtree(temp_out_dir, ignore_errors=True)
