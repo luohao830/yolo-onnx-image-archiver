@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple
 
@@ -463,32 +464,51 @@ def run_job(
     zip_tmp: Optional[str] = None
     zip_saved_rel = ""
     if do_package:
-        try:
-            def _on_package_progress(pkg_info: PackageProgress) -> None:
-                if pkg_info.total > 0:
-                    pkg_status["pct"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
-                else:
-                    pkg_status["pct"] = 0.0
-                pkg_status["desc"] = f"打包中：{pkg_info.processed}/{pkg_info.total} 个文件，进度 {pkg_status['pct'] * 100:.1f}%"
+        def _on_package_progress(pkg_info: PackageProgress) -> None:
+            if pkg_info.total > 0:
+                pkg_status["pct"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
+            else:
+                pkg_status["pct"] = 0.0
+            pkg_status["desc"] = f"打包中：{pkg_info.processed}/{pkg_info.total} 个文件，进度 {pkg_status['pct'] * 100:.1f}%"
 
-            _on_package_progress(PackageProgress(processed=0, total=0))
+        # 在后台线程执行打包，生成器轮询共享状态，使打包进度条实时更新
+        # （同步阻塞调用会让 yield 无法触发，进度条卡在初值）。
+        pkg_result: List[PackageSummary] = []
+        pkg_error: List[BaseException] = []
+
+        def _run_package() -> None:
+            try:
+                pkg_result.append(
+                    package_output_dir(
+                        Path(summary.out_dir),
+                        progress_callback=_on_package_progress,
+                    )
+                )
+            except BaseException as exc:  # noqa: BLE001
+                pkg_error.append(exc)
+
+        _on_package_progress(PackageProgress(processed=0, total=0))
+        yield progress_status["text"], None, "", 1.0, pkg_status["pct"]
+
+        t = threading.Thread(target=_run_package, daemon=True, name="yolo-package")
+        t.start()
+        while t.is_alive():
+            t.join(timeout=0.2)
             yield progress_status["text"], None, "", 1.0, pkg_status["pct"]
 
-            pkg: PackageSummary = package_output_dir(
-                Path(summary.out_dir),
-                progress_callback=_on_package_progress,
-            )
+        if pkg_error:
+            logger.exception("打包失败")
+            zip_tmp = None
+            zip_saved_rel = f"打包失败: {pkg_error[0]}"
+            yield progress_status["text"], None, "", 1.0, 0.0
+        else:
+            pkg = pkg_result[0]
             zip_tmp = pkg.zip_tmp_path
             try:
                 zip_saved_rel = str(Path(pkg.zip_saved_path).resolve().relative_to(IMAGES_DIR))
             except Exception:  # noqa: BLE001
                 zip_saved_rel = pkg.zip_saved_path
             yield progress_status["text"], None, "", 1.0, 1.0
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("打包失败")
-            zip_tmp = None
-            zip_saved_rel = f"打包失败: {exc}"
-            yield progress_status["text"], None, "", 1.0, 0.0
 
     by_label = sorted(summary.by_label.items(), key=lambda x: (-x[1], x[0]))
     stats = "，".join([f"{k}:{v}" for k, v in by_label])
@@ -557,17 +577,30 @@ def package_only(out_rel: str) -> Generator[Tuple[str, Optional[str], float], No
     def _on_pkg(pkg_info: PackageProgress) -> None:
         if pkg_info.total > 0:
             pkg_pct["value"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
-        yield_pkg = pkg_pct["value"]  # noqa: F841
 
-    try:
-        yield "开始打包...", None, 0.0
-        pkg = package_output_dir(out_dir, progress_callback=_on_pkg)
+    # 同步 package_output_dir 会阻塞生成器，改为后台线程 + 轮询 yield 实时进度。
+    pkg_result: List[PackageSummary] = []
+    pkg_error: List[BaseException] = []
+
+    def _run_pkg() -> None:
+        try:
+            pkg_result.append(package_output_dir(out_dir, progress_callback=_on_pkg))
+        except BaseException as exc:  # noqa: BLE001
+            pkg_error.append(exc)
+
+    yield "开始打包...", None, 0.0
+    t = threading.Thread(target=_run_pkg, daemon=True, name="yolo-package-only")
+    t.start()
+    while t.is_alive():
+        t.join(timeout=0.2)
         yield f"打包进度：{pkg_pct['value'] * 100:.1f}%", None, pkg_pct["value"]
-    except Exception as exc:  # noqa: BLE001
+
+    if pkg_error:
         logger.exception("打包失败")
-        yield f"打包失败: {exc}", None, 0.0
+        yield f"打包失败: {pkg_error[0]}", None, 0.0
         return
 
+    pkg = pkg_result[0]
     try:
         saved_rel = str(Path(pkg.zip_saved_path).resolve().relative_to(IMAGES_DIR))
     except Exception:  # noqa: BLE001
@@ -628,8 +661,8 @@ def build_app() -> gr.Blocks:
                 imageset_dropdown = gr.Dropdown(label="快捷选择已有目录（可选）", choices=[], multiselect=False)
                 refresh_imageset_btn = gr.Button("刷新快捷目录")
                 use_imageset_btn = gr.Button("填入选择")
-            infer_progress_bar = gr.Slider(0, 100, value=0, step=0.1, label="推理进度（%）", interactive=False)
-            package_progress_bar = gr.Slider(0, 100, value=0, step=0.1, label="打包进度（%）", interactive=False)
+            infer_progress_bar = gr.Slider(0, 1, value=0, step=0.01, label="推理进度", interactive=False)
+            package_progress_bar = gr.Slider(0, 1, value=0, step=0.01, label="打包进度", interactive=False)
             with gr.Row():
                 model_type = gr.Radio(
                     label="模型类型",
@@ -731,7 +764,7 @@ def build_app() -> gr.Blocks:
             pkg_btn = gr.Button("开始打包")
             pkg_status = gr.Textbox(label="状态", interactive=False)
             pkg_zip = gr.File(label="下载 zip（临时文件）", interactive=False)
-            pkg_progress_only = gr.Slider(0, 100, value=0, step=0.1, label="打包进度（%）", interactive=False)
+            pkg_progress_only = gr.Slider(0, 1, value=0, step=0.01, label="打包进度", interactive=False)
 
             def _set_output_run_choices():
                 return gr.Dropdown(choices=_output_run_choices())

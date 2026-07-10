@@ -27,9 +27,8 @@ class JobState:
 
 @dataclass
 class _WorkerSlot:
-    request_queue: "Any"
+    request_queue: "mp.Queue[Dict[str, Any]]"
     process: Any
-    alive: bool = True
 
 
 class InferenceJobManager:
@@ -83,27 +82,18 @@ class InferenceJobManager:
         except Exception:  # noqa: BLE001
             return 0
 
-    def _next_target_slot(self) -> _WorkerSlot:
-        # 跳过已退出 worker，必要时重启。
-        for _ in range(len(self._slots)):
-            idx = self._next_slot % len(self._slots)
-            self._next_slot += 1
-            slot = self._slots[idx]
-            if not slot.alive or not slot.process.is_alive():
-                self._restart_slot(idx)
-                slot = self._slots[idx]
-            return slot
-        slot = self._slots[0]
-        return slot
-
     def _restart_slot(self, idx: int) -> None:
         slot = self._slots[idx]
         logger.warning("检测到推理 worker(%d) 已退出，正在重启", idx)
+        # 回收旧进程，避免僵尸进程累积
+        try:
+            slot.process.join(timeout=1.0)
+        except Exception:  # noqa: BLE001
+            pass
         gpu_index = idx if self._visible_gpu_count() >= 1 else None
         proc = create_worker_process(slot.request_queue, self._event_queue, gpu_index=gpu_index)
         proc.start()
         slot.process = proc
-        slot.alive = True
 
     def _collect_events(self) -> None:
         while not self._shutdown:
@@ -131,10 +121,18 @@ class InferenceJobManager:
                     job.error = str((event.get("data") or {}).get("message", "推理失败"))
 
     def submit(self, payload: Dict[str, Any]) -> str:
+        # 锁内只做注册与选取索引（含 _next_slot 自增，避免并发竞态），
+        # 把 _next_target_slot 中可能触发的进程重启 spawn 移到锁外，
+        # 避免阻塞其他 submit / poll_event / drop。
         with self._lock:
             job_id = uuid.uuid4().hex
             self._jobs[job_id] = JobState(job_id=job_id)
-            slot = self._next_target_slot()
+            idx = self._next_slot % len(self._slots)
+            self._next_slot += 1
+        slot = self._slots[idx]
+        if not slot.process.is_alive():
+            self._restart_slot(idx)
+            slot = self._slots[idx]
         slot.request_queue.put({"command": "infer", "job_id": job_id, "payload": payload})
         return job_id
 

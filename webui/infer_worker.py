@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import logging
 import os
 import queue
 import traceback
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from webui.processing import InferenceSummary, run_inference
 from webui.utils import get_logger
@@ -149,10 +148,10 @@ def _worker_loop(
 
 
 def create_worker_process(
-    request_queue,
-    event_queue,
+    request_queue: "queue.Queue[Dict[str, Any]]",
+    event_queue: "queue.Queue[Dict[str, Any]]",
     gpu_index: Optional[int] = None,
-):
+) -> "mp.Process":
     import multiprocessing as mp
 
     ctx = mp.get_context("spawn")
