@@ -5,6 +5,7 @@ __pycache__/
 .mypy_cache/
 .DS_Store
 .python-version
+.env
 .codex/
 .codegraph/
 .superpowers/
@@ -16,8 +17,10 @@ dist/
 images/*
 !images/.gitkeep
 !images/uploads/
+images/uploads/*
 !images/uploads/.gitkeep
 !images/output/
+images/output/*
 !images/output/.gitkeep
 
 models/*.onnx
