@@ -487,7 +487,8 @@ def _iter_package_files(out_dir: Path) -> list[tuple[Path, Path]]:
         for name in names:
             abs_path = Path(root) / name
             arcname = abs_path.relative_to(out_dir)
-            files.append((arcname, abs_path))
+            # arcname 统一为 POSIX 风格（ZIP 规范要求正斜杠），避免 Windows 反斜杠写入
+            files.append((Path(arcname.as_posix()), abs_path))
     return files
 
 
@@ -500,6 +501,7 @@ def package_output_dir(
     """把输出目录打包为 zip（ZIP_STORED，等价 `zip -r -0`，只打包不压缩）。
 
     progress_callback 在写入每个文件后回调，传递 PackageProgress(processed, total)。
+    失败时仍会调度清理临时 zip，避免 tmp 残留。
     """
     out_dir = out_dir.expanduser().resolve()
     if not out_dir.exists() or not out_dir.is_dir():
@@ -510,29 +512,42 @@ def package_output_dir(
 
     tmp_dir = Path(tempfile.gettempdir()).resolve()
     zip_tmp = unique_path(tmp_dir / out_dir.name).with_suffix(".zip")
-    # ZIP_STORED：不压缩，等价 zip -r -0
-    with zipfile.ZipFile(zip_tmp, "w", compression=zipfile.ZIP_STORED) as zf:
-        processed = 0
-        for arcname, abs_path in files:
-            zf.write(abs_path, arcname, compress_type=zipfile.ZIP_STORED)
-            processed += 1
-            if progress_callback is not None:
-                progress_callback(PackageProgress(processed=processed, total=total))
-
-    saved_base = unique_path(out_dir.parent / out_dir.name)
-    zip_saved = saved_base.with_suffix(".zip")
+    failed = False
     try:
-        if zip_saved.resolve() != zip_tmp.resolve():
-            shutil.copy2(str(zip_tmp), str(zip_saved))
-        else:
+        # ZIP_STORED：不压缩，等价 zip -r -0
+        with zipfile.ZipFile(zip_tmp, "w", compression=zipfile.ZIP_STORED) as zf:
+            processed = 0
+            for arcname, abs_path in files:
+                # 强制 ZIP 条目名使用正斜杠（ZIP 规范），跨平台一致
+                zf.write(abs_path, arcname.as_posix())
+                processed += 1
+                if progress_callback is not None:
+                    progress_callback(PackageProgress(processed=processed, total=total))
+
+        saved_base = unique_path(out_dir.parent / out_dir.name)
+        zip_saved = saved_base.with_suffix(".zip")
+        try:
+            if zip_saved.resolve() != zip_tmp.resolve():
+                shutil.copy2(str(zip_tmp), str(zip_saved))
+            else:
+                zip_saved = zip_tmp
+        except FileNotFoundError:
             zip_saved = zip_tmp
-    except FileNotFoundError:
-        zip_saved = zip_tmp
 
-    if keep_tmp_seconds > 0:
-        _schedule_delete(zip_tmp, delay_sec=int(keep_tmp_seconds))
+        if keep_tmp_seconds > 0:
+            _schedule_delete(zip_tmp, delay_sec=int(keep_tmp_seconds))
 
-    return PackageSummary(out_dir=str(out_dir), zip_tmp_path=str(zip_tmp), zip_saved_path=str(zip_saved))
+        return PackageSummary(out_dir=str(out_dir), zip_tmp_path=str(zip_tmp), zip_saved_path=str(zip_saved))
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        if failed and zip_tmp.exists():
+            # 失败时立即清理临时 zip，避免 tmp 残留
+            try:
+                zip_tmp.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def run_inference(

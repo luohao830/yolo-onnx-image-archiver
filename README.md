@@ -58,7 +58,7 @@ device_ids: ["0"]
 device_ids: ["0","1"]
 ```
 
-宿主机路径挂载：`docker-compose.yml` 中 `volumes` 把 `/data/xxx/images:/data/images` 改成你的实际宿主机绝对路径（左右两侧指向同一个目录）。同时在 `environment` 把 `HOST_IMAGES_DIR` 改为相同的宿主机路径，WebUI 会用它把用户输入的宿主机绝对路径换算为容器内 `/data/images` 下的路径，从而正确读取。
+宿主机路径挂载：`docker-compose.yml` 中 images 挂载与 `HOST_IMAGES_DIR` 使用同一个环境变量 `IMAGES_HOST_DIR` 统一控制（默认回退 `/tmp/yolo_images`，开箱测试用；生产环境务必覆盖）。设置 `IMAGES_HOST_DIR` 为宿主机存放图片的实际绝对路径（与挂载目标 `/data/images` 指向同一个目录）后，WebUI 会用它把用户输入的宿主机绝对路径换算为容器内 `/data/images` 下的路径，从而正确读取。例如：`IMAGES_HOST_DIR=/home/luohao/myimgs docker compose up -d`。
 
 验证 GPU：
 

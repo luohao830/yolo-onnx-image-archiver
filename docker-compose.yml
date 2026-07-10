@@ -7,15 +7,15 @@ services:
     restart: unless-stopped
     shm_size: "2gb"
     volumes:
-      # 修改这里的左侧为宿主机绝对路径：挂载的是同一个 images 目录，但用户在 WebUI 输入
-      # 宿主机绝对路径时即可直接定位到该目录下的子目录。请把 /data/xxx/images 改成你的实际路径，
-      # 同时把下方 HOST_IMAGES_DIR 改为相同的宿主机路径，WebUI 会用它做宿主机→容器路径换算。
-      - /data/xxx/images:/data/images
+      # 修改这里的左侧为宿主机存放图片的实际绝对路径；通过 IMAGES_HOST_DIR 变量统一控制，
+      # WebUI 会基于它做“宿主机绝对路径→容器内 /data/images”换算。
+      # 未设置 IMAGES_HOST_DIR 时回退到 /tmp/yolo_images 以便开箱测试，请生产环境务必覆盖。
+      - ${IMAGES_HOST_DIR:-/tmp/yolo_images}:/data/images
       - ./models:/data/models
       - ./webui:/app/webui
     environment:
       - IMAGES_DIR=/data/images
-      - HOST_IMAGES_DIR=/data/xxx/images
+      - HOST_IMAGES_DIR=${IMAGES_HOST_DIR:-/tmp/yolo_images}
       - MODELS_DIR=/data/models
       - TZ=Asia/Shanghai
     deploy:
