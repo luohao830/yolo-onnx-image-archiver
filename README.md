@@ -32,6 +32,20 @@
 1. 将 `.onnx` 模型放入 `models/`（可附带同名 `.names`/`.txt`/`.json` 说明类别名）。
 2. 将待推理图片放入 `images/` 下某个目录，或直接在 WebUI“上传图片”页上传图片/`.zip`。
 
+## 配置宿主机图片目录
+
+Docker Compose 启动前必须手动配置 `.env`。先复制脱敏模板，再把
+`IMAGES_HOST_DIR` 修改为宿主机存放图片的实际绝对路径：
+
+```bash
+cp .env.example .env
+# 编辑 .env，将 IMAGES_HOST_DIR 改为实际图片目录
+```
+
+`IMAGES_HOST_DIR` 指向的目录会挂载到容器内的 `/data/images`，必须与
+`HOST_IMAGES_DIR` 使用同一个宿主机路径。`.env` 仅用于本地配置，不要提交；
+`.env.example` 只保留不含敏感信息的配置示例。
+
 ## Docker 运行
 
 ```bash
@@ -58,7 +72,7 @@ device_ids: ["0"]
 device_ids: ["0","1"]
 ```
 
-宿主机路径挂载：`docker-compose.yml` 中 images 挂载与 `HOST_IMAGES_DIR` 使用同一个环境变量 `IMAGES_HOST_DIR` 统一控制（默认回退 `/tmp/yolo_images`，开箱测试用；生产环境务必覆盖）。设置 `IMAGES_HOST_DIR` 为宿主机存放图片的实际绝对路径（与挂载目标 `/data/images` 指向同一个目录）后，WebUI 会用它把用户输入的宿主机绝对路径换算为容器内 `/data/images` 下的路径，从而正确读取。例如：`IMAGES_HOST_DIR=/home/luohao/myimgs docker compose up -d`。
+宿主机路径挂载：`docker-compose.yml` 中 images 挂载与 `HOST_IMAGES_DIR` 使用同一个环境变量 `IMAGES_HOST_DIR` 统一控制。启动前请在 `.env` 中设置宿主机存放图片的实际绝对路径（与挂载目标 `/data/images` 指向同一个目录），WebUI 会用它把用户输入的宿主机绝对路径换算为容器内 `/data/images` 下的路径，从而正确读取。
 
 验证 GPU：
 
