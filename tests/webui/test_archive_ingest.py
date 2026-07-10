@@ -91,3 +91,39 @@ def test_extract_empty_zip(tmp_path: Path) -> None:
     extracted = extract_upload_archive(archive, out_dir)
     assert extracted == []
     assert out_dir.exists() and not any(out_dir.iterdir())
+
+
+def test_extract_rejects_oversized_file(tmp_path: Path) -> None:
+    """单个文件超过 MAX_FILE_BYTES 时拒绝（zip 炸弹防护）。"""
+    import webui.archive_ingest as ai
+
+    archive = _write_zip(tmp_path, "big.zip", _make_zip({"big.jpg": b"0123456789abcdef"}))
+    out_dir = tmp_path / "out"
+
+    original_max = ai.MAX_FILE_BYTES
+    ai.MAX_FILE_BYTES = 4
+    try:
+        with pytest.raises(ValueError):
+            extract_upload_archive(archive, out_dir)
+    finally:
+        ai.MAX_FILE_BYTES = original_max
+
+
+def test_extract_rejects_total_overflow(tmp_path: Path) -> None:
+    """多文件累计超过 MAX_TOTAL_BYTES 时拒绝。"""
+    import webui.archive_ingest as ai
+
+    archive = _write_zip(
+        tmp_path,
+        "many.zip",
+        _make_zip({"a.jpg": b"12345", "b.jpg": b"12345"}),
+    )
+    out_dir = tmp_path / "out"
+
+    original_total = ai.MAX_TOTAL_BYTES
+    ai.MAX_TOTAL_BYTES = 4
+    try:
+        with pytest.raises(ValueError):
+            extract_upload_archive(archive, out_dir)
+    finally:
+        ai.MAX_TOTAL_BYTES = original_total
