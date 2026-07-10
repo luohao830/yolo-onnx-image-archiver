@@ -1,47 +1,31 @@
 services:
-  backend:
+  webui:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: yolo_platform_backend
+    container_name: yolo_webui
     restart: unless-stopped
     shm_size: "2gb"
     volumes:
+      # 修改这里的左侧为宿主机绝对路径：挂载的是同一个 images 目录，但用户在 WebUI 输入
+      # 宿主机绝对路径时即可直接定位到该目录下的子目录。请把 /data/xxx/images 改成你的实际路径，
+      # 同时把下方 HOST_IMAGES_DIR 改为相同的宿主机路径，WebUI 会用它做宿主机→容器路径换算。
+      - /data/xxx/images:/data/images
       - ./models:/data/models
-      - ./runtime:/app/runtime
       - ./webui:/app/webui
     environment:
+      - IMAGES_DIR=/data/images
+      - HOST_IMAGES_DIR=/data/xxx/images
       - MODELS_DIR=/data/models
-      - YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS=172.16.0.0/12
-      - YOLO_PLATFORM_ADMIN_IP_WHITELIST=192.168.11.0/24
+      - TZ=Asia/Shanghai
     deploy:
       resources:
         reservations:
           devices:
+            # 默认仅挂载 GPU 0。如需启用任务级双 GPU 分流，把 device_ids 改为 ["0","1"]。
             - driver: nvidia
-              count: all
+              device_ids: ["0"]
               capabilities:
                 - gpu
-    expose:
-      - "8000"
-
-  user-app:
-    build:
-      context: ./frontend/user-app
-      dockerfile: Dockerfile
-    container_name: yolo_platform_user_app
-    restart: unless-stopped
-    expose:
-      - "80"
-
-  gateway:
-    image: nginx:1.27-alpine
-    container_name: yolo_platform_gateway
-    restart: unless-stopped
-    depends_on:
-      - backend
-      - user-app
     ports:
-      - "58000:80"
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - "7860:7860"

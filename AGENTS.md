@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-YOLO 多用户推理平台，让用户无需账户即可提交图片/压缩包进行 YOLO 推理，并在任务全生命周期中获得状态、日志和结果下载。仓库包含 FastAPI 后端、内置管理员后台的 React 前台、Nginx 统一入口，以及旧版 Gradio 工具链 `webui/`（当前仅作为推理内核被后端适配层复用）。
+基于 Gradio 的单机 YOLO ONNX 推理与归档工具：用户在浏览器中上传或选择 `.onnx` 模型、上传图片或 `.zip` 压缩包，选择关注类别后运行推理，按类别归档到输出目录，并支持画框、YOLO `labels/txt` 导出与结果 `zip` 打包下载。
 
 ## 协作与实现原则
 
@@ -15,180 +15,129 @@ YOLO 多用户推理平台，让用户无需账户即可提交图片/压缩包�
 ### Docker Compose 启动（生产/集成验证）
 
 ```bash
-mkdir -p models runtime
+mkdir -p models
 docker compose build
 docker compose up -d
 ```
 
-访问：`http://127.0.0.1:58000/`  
-路由：`/` 用户前台，`/admin/` 管理员后台，`/api/...` 后端 API。
+访问：`http://127.0.0.1:7860/`
 
 常用运维：
 
 ```bash
 docker compose ps
-docker compose logs -f backend
-docker compose logs -f gateway
+docker compose logs -f webui
 docker compose down
 ```
 
-### 后端本地开发
+### 本机开发
 
 ```bash
 python -m pip install -r requirements.txt
-uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+python -m webui.app
 ```
 
-后端入口 `backend/main.py`，所有路由前缀 `/api`。
-
-### 前端本地开发
-
-```bash
-cd frontend/user-app
-npm install
-npm run dev
-```
-
-Vite 开发服务器默认 `http://127.0.0.1:5173`，并将 `/api` 代理到 `http://127.0.0.1:8000`。管理员后台由同一个 `frontend/user-app/` 应用承载，访问 `/admin/`。
+入口 `webui/app.py` 的 `main()`，默认监听 `0.0.0.0:7860`。
 
 ### 测试
 
-后端全部测试：
+webui 纯函数测试：
 
 ```bash
-python -m pytest tests/backend -v
+python -m pytest tests/webui -v
 ```
 
-运行单个测试文件或单个用例：
+运行单个测试文件或用例：
 
 ```bash
-python -m pytest tests/backend/test_archive_ingest.py -v
-python -m pytest tests/backend/test_scheduler.py::test_scheduler_runs_pending_jobs -v
+python -m pytest tests/webui/test_archive_ingest.py -v
+python -m pytest tests/webui/test_label_and_postprocess.py::test_sanitize_label_passes_clean_text -v
 ```
 
-前端测试：
+语法校验：
 
 ```bash
-cd frontend/user-app
-npm test
-```
-
-前端构建验证：
-
-```bash
-cd frontend/user-app && npm run build
+python3 -m py_compile webui/*.py
 ```
 
 ### 健康检查
 
-```bash
-curl http://127.0.0.1:58000/api/healthz
-```
+无独立健康检查端点；浏览器访问 `http://127.0.0.1:7860/` 即为 WebUI 首页。
 
 ## 项目结构与路径
 
-- 根目录包含容器编排与后端镜像文件：`docker-compose.yml`、`Dockerfile`、`requirements.txt`。
-- `backend/` 是 FastAPI 后端，包含 API 路由、服务层、仓储层、数据库模型、运行时路径管理和 worker 基础能力。
-- `frontend/user-app/` 是用户前台与内置管理员后台，使用 Vite + React + TypeScript。
-- `gateway/` 保存统一入口 Nginx 配置；Docker Compose 通过 `gateway` 将 `/` 和 `/api/` 聚合到宿主机 `58000` 端口，`/admin/` 由 `user-app` 的前端路由承载；访问日志使用不含 query string 的格式，避免任务凭证和短期 SSE token 落盘。
-- `webui/` 是旧版 Gradio 工具链和推理内核，当前不再是默认容器入口，但 `backend/services/inference_adapter.py` 会复用 `webui.processing`。
-- `models/` 保存宿主机模型文件，Docker 后端挂载为 `/data/models`。
-- `runtime/` 是运行时工作区，保存 SQLite 数据库、上传文件、任务目录、结果目录和临时文件；不要提交运行产物。
-- `images/` 主要服务旧版 `webui/` 工作流，当前 Docker Compose 不挂载该目录。
-- `tests/backend/` 保存后端单元测试与 API smoke 测试；前端测试放在各自 `src/**/__tests__/` 附近。
+- `webui/`：Gradio 页面与推理工具链。`app.py` 为页面入口；`job_manager.py` 管理多 worker 任务队列；`infer_worker.py` 是独立推理 worker 进程并负责 GPU 检测/绑定；`processing.py` 是推理内核 `run_inference` 与打包 `package_output_dir`；`archive_ingest.py` 处理 `.zip` 解压；`utils.py`/`label_utils.py`/`yolo_postprocess.py` 为辅助与后处理。
+- `models/` 保存 `.onnx` 模型与同名 sidecar（`.names`/`.txt`/`.json`）；Docker 中挂载为 `/data/models`。
+- `images/` 是图片与输出工作区，Docker 中挂载为 `/data/images`；其下 `uploads/` 存上传图片与解压结果，`output/<run_id>/` 存推理归档与打包 zip。
+- `tests/webui/` 保存 webui 纯函数测试；不要提交运行产物。
 
 ## 当前架构状态
 
-- 主线平台由 `backend`、`user-app` 和 `gateway` 3 个 Compose 服务组成。
-- 后端默认使用 SQLite，数据库文件位于 `runtime/app.db`；当前没有 MongoDB，也不使用 `fo_data/`。
-- 公开接口已支持创建任务凭证、人员筛选与高级模式上传入队、查询任务状态/关键日志、短期 token 鉴权的 SSE 实时事件推送、下载已完成任务结果压缩包、获取逐图检测结果与结果图片、列出高级模式可见模型。
-- 管理员接口面向内网单机访问，已支持模型创建/目录刷新/ONNX 上传/发布、并发配置、任务列表、任务详情、结果下载、取消、重试、短期 token 鉴权的 SSE 实时事件、逐图检测结果与结果图片。
-- 公开前台的人员筛选模式已接入图片或 `.zip` 压缩包上传、归档解压、默认人员模型绑定和任务入队；高级模式已接通 `model_id` 与 `payload`（conf/iou/batch/imgsz/draw_boxes/save_txt 等，服务端 normalize 合并默认值）创建任务并上传文件入队。
+- 仓库为单机 Gradio 工具，唯一运行入口为 `python -m webui.app`。
+- Docker Compose 单服务 `webui`，暴露 7860，挂载 NVIDIA GPU（默认仅 GPU 0）。
 
-## 后端分层
+## 模块分层（webui/）
 
-- `backend/api/routes/`：路由实现；公开接口在 `public_jobs.py`，管理员接口在 `admin_*.py`。
-- `backend/api/deps.py`：依赖注入，管理员鉴权通过 `require_admin` 实现。
-- `backend/services/`：业务逻辑。`job_service.py` 负责任务创建、上传、序列化；`scheduler_service.py` 组装调度器；`inference_adapter.py` 对接 `webui.processing`；`archive_ingest.py` 处理 `.zip` 解压；`runtime_paths.py` 管理运行时目录。
-- `backend/repositories/`：SQLAlchemy 数据访问，目录下有 `jobs.py`、`models.py`、`system_configs.py`。
-- `backend/db/models.py`：全部数据库模型（`JobRecord`、`ModelRecord`、`SystemConfigRecord`、`JobEventRecord`）。
-- `backend/core/`：配置（`config.py`，环境变量前缀 `YOLO_PLATFORM_`）、数据库连接（`db.py`）、管理员鉴权（`admin_auth.py`）。
-- `backend/workers/`：`Scheduler` 负责任务队列与线程池；`GpuGate` 限制并发 GPU 推理槽位；`TaskRunner` 调用推理适配层并写入进度事件。
+- `app.py`：Gradio 页面与事件编排（上传模型/图片/zip、运行推理、单独打包）。
+- `job_manager.py`：`InferenceJobManager` 多 worker 池，按可见 GPU 数创建 worker 进程，任务 round-robin 分发。
+- `infer_worker.py`：推理 worker 循环与 `detect_available_gpus()`；通过 `CUDA_VISIBLE_DEVICES` 限定单 worker 可见 GPU 实现任务级多 GPU 分流。
+- `processing.py`：`run_inference` 推理内核（letterbox/ONNX session/NMS/按类别硬链接或复制归档/画框/txt 导出），`package_output_dir` 打包（`ZIP_STORED`，等价 `zip -r -0`）。
+- `archive_ingest.py`：`extract_upload_archive` 安全解压 `.zip`（路径遍历防护 + 原子替换，仅保留受支持图片扩展名）。
+- `utils.py`：路径/文件名/日志辅助，`resolve_images_dir` 兼容相对路径与宿主机绝对路径换算。
 
 ## 调度与推理流程
 
-1. `POST /api/jobs` 创建任务，返回 `job_code` 和 `access_token`。
-2. `POST /api/jobs/{job_code}/upload` 接收图片或 `.zip`，校验、解压、绑定默认人员模型，然后 `scheduler.submit(job_id)`。
-3. `Scheduler` 使用固定线程池消费队列，每个线程通过 `DatabaseTaskRunner` 新建独立会话运行 `TaskRunner.run(job_id)`。
-4. `TaskRunner` 获取任务、模型与 `payload_json`，经 `GpuGate` 调用 `inference_adapter.run_job_inference`，后者委托 `webui.processing.run_inference`。
-5. 推理回调 `ProgressEventWriter` 将进度写入 `JobEventRecord`（节流到每 2 秒或处理数变化）。
-6. 完成后调用 `inference_adapter.package_job_output` 生成结果压缩包，更新任务为 `completed`。
+1. 用户在 WebUI 选择模型、填入图片目录（相对 `images/`、上传 zip 自动回填、或宿主机绝对路径），设置推理参数。
+2. `run_job` 经 `resolve_images_dir` 解析为容器内目录，组装 payload 提交给 `InferenceJobManager.submit`。
+3. `InferenceJobManager` 按可见 GPU 数创建 N 个 worker 进程，任务 round-robin 分发到某 worker 的请求队列；该 worker 已通过 `CUDA_VISIBLE_DEVICES` 绑定特定 GPU。
+4. worker 调用 `run_inference` 执行推理，经进度回调把 `InferenceProgress` 写回事件队列，WebUI 推进推理进度条。
+5. 推理完成后按类别把原图硬链接/复制归档到 `output/<run_id>/<类别>/images`、`labels`、`<类别>_画框`。
+6. 勾选打包时，`package_output_dir` 用 `ZIP_STORED` 打成不压缩 zip，WebUI 用独立的打包进度条显示进度并产出可下载文件。
 
-## 任务状态
+## 多 GPU 策略
 
-`created` → `uploaded` → `running` → `completed`/`failed`/`canceled`。`cancel_requested` 标记用于运行中任务的取消信号（当前由推理循环自行检查）。
+- `docker-compose.yml` 默认 `device_ids: ["0"]`，仅挂载 GPU 0；改为 `["0","1"]` 即可挂载双 GPU。
+- `detect_available_gpus()` 依据 `CUDA_VISIBLE_DEVICES` 计数可见 GPU：
+  - 可见 ≥ 2：开启任务级多 GPU 分流，多个 worker 各绑定一块 GPU 并发执行任务。
+  - 可见 = 1：单 worker 落 GPU 0。
+  - 0（无 CUDA EP）：1 个 CPU worker，自动回退。
+- 单任务推理内部仍是单 GPU 单 batch（非 batch 级切分）。
 
-## 管理员鉴权
+## 宿主机路径兼容
 
-- `POST /api/admin/login` 用管理员密钥换取 token，默认密钥为 `dev-secret`，仅本地使用。
-- 管理员任务 SSE 先通过 `POST /api/admin/jobs/{job_id}/events-token` 签发短期、绑定任务的 `sse_token`，再访问 `GET /api/admin/jobs/{job_id}/events?sse_token=...`；IP 白名单来源保持免 token 兼容。
-- `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 可配置免密 IP/CIDR。
-- 反代场景下后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 `X-Real-IP`，不信任 `X-Forwarded-For`。
+- `resolve_images_dir(path_text, images_dir, host_images_dir)`：
+  - 相对路径 → `images_dir/rel`。
+  - 宿主机绝对路径 → 以 `host_images_dir` 为前缀换算为 `images_dir` 下路径（`HOST_IMAGES_DIR` 环境变量，默认与 `IMAGES_DIR` 相同）。
+  - 容器内绝对路径 → 直接 resolve。
+- 在 `docker-compose.yml` 中把 `volumes` 的左侧改为实际宿主机绝对路径，并把 `HOST_IMAGES_DIR` 改为同一路径即可。
 
-## 配置与运行时约束
+## 上传与解压
 
-- 后端配置使用 `YOLO_PLATFORM_` 环境变量前缀，核心变量包括 `YOLO_PLATFORM_RUNTIME_ROOT`、`YOLO_PLATFORM_DATABASE_URL`、`YOLO_PLATFORM_ADMIN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_SECRET`、`YOLO_PLATFORM_ADMIN_TOKEN_TTL_SECONDS`、`YOLO_PLATFORM_ADMIN_IP_WHITELIST` 和 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS`。
-- 管理员默认密钥为 `dev-secret`，仅可用于本地开发；线上环境必须覆盖。
-- Docker 后端将宿主机 `models/` 挂载为 `/data/models`；管理员后台会扫描该目录下的 `.onnx` 并导入缺失记录，也可上传 `.onnx` 到该目录，导入记录默认不自动发布或设为默认人员模型。
-- Gateway Nginx 通过 `client_max_body_size 100g` 允许人员筛选模式上传图片或压缩包；后端同步按上传原始文件大小限制为 100G，不再按解压后的图片数量或总大小限制。`.zip` 压缩包每次都会重新上传并解压到当前任务目录，不做 hash 复用或服务端压缩包缓存；gateway 访问日志不得记录 query string，避免 `access_token` 或短期 SSE token 落盘；修改体积、上传语义或日志格式时必须同步文档。
-- 管理员 IP 白名单使用 `YOLO_PLATFORM_ADMIN_IP_WHITELIST` 配置，支持逗号分隔 IP 或 CIDR；反代部署时后端仅在直连来源命中 `YOLO_PLATFORM_ADMIN_TRUSTED_PROXY_CIDRS` 时读取 gateway 覆盖写入的 `X-Real-IP`，不信任客户端传入的 `X-Forwarded-For`。
-- Docker Compose 默认向后端容器暴露全部 NVIDIA GPU；如需固定 GPU，在 `backend.deploy.resources.reservations.devices` 中使用 `device_ids`，并且不要同时设置 `count`。
-- OpenCodeReview workflow 默认显式写入 `llm.use_anthropic=false` 使用 OpenAI 兼容协议；通过 `llm.extra_body='{"enable_thinking": false}'` 禁用思考模式以兼容各类 LLM 供应商（与官方 `alibaba/open-code-review` 示例一致）；当配置了 `OCR_LLM_REASONING_EFFORT`（取值 `low`/`medium`/`high`/`xhigh`）时，自动切换为 `{"enable_thinking": true, "reasoning_effort": "<强度>"}` 启用思考模式，配置不输出到运行日志；非敏感 OCR 配置优先读取 GitHub Actions Variables，Secrets 值仍会被 GitHub 自动脱敏。
-- 修改端口、路由、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
-
-## 模型管理
-
-- 模型记录指向 `.onnx` 文件；Docker 中宿主机 `models/` 挂载为 `/data/models`。
-- `GET /api/admin/models` 会自动扫描目录并导入缺失的 `.onnx` 记录。
-- 上传/导入的模型默认未发布、未对高级模式可见、未设为默认人员模型，需要管理员在模型管理页发布。
-- 只有 `model_kind == person_detector` 的模型可被设为默认人员模型。
-
-## 公开 API 边界
-
-当前公开 API 已实现：任务创建（含高级模式 `model_id`/`payload`）、人员筛选与高级模式上传入队、状态查询、短期 token 鉴权的 SSE 实时事件推送、结果下载、逐图检测结果获取、结果图片获取、列出已发布的高级模式模型。高级模式的任务参数与文件上传提交已接通公开 API。
-
-## 上传与体积限制
-
-- Gateway 设置 `client_max_body_size 100g`；后端按原始文件大小限制 `100G`。
-- 不再按解压后的图片数量或总大小限制。
-- `.zip` 每次都会重新上传到当前任务目录并解压，不做 hash 复用或服务端压缩包缓存。
+- `.zip` 压缩包每次重新上传并解压到 `images/uploads/<run_id>/` 下的独立子目录，不做 hash 复用或缓存。
+- 解压仅保留受支持的图片扩展名（`.jpg/.jpeg/.png/.bmp/.tif/.tiff/.webp/.gif`），含路径遍历防护。
+- 解压完成后自动把解压目录（相对 `images/`）回填到推理输入框，无需手动输入。
 
 ## 编码风格与命名
 
 - Python 遵循 PEP 8：4 空格缩进，函数与文件使用 `snake_case`，类使用 `CapWords`。
-- FastAPI 路由保持在 `backend/api/routes/`，依赖注入放在 `backend/api/deps.py`，业务逻辑优先放入 `backend/services/`，数据库访问放入 `backend/repositories/`。
-- 数据库模型集中在 `backend/db/models.py`；新增持久化字段时同步补充仓储、服务和测试。
-- React 组件与页面使用 TypeScript，页面放在 `src/pages/`，通用组件放在 `src/components/`，API 封装放在 `src/api/client.ts` 与 `src/admin-api/client.ts`。
 - 公共辅助函数添加简短 docstring 或清晰类型签名；日志优先于 `print`。
-- 避免把新平台逻辑继续塞入旧版 `webui/app.py`；除非是在维护旧 Gradio 调试入口或推理内核。
 
-## 设计系统要点（来自 DESIGN.md）
+## 配置与运行时约束
 
-- 品牌气质：冷静、工程化、可信。
-- 页面背景 `#f8fafc`，卡片背景 `#ffffff`；主色 `#2563eb` 仅用于主按钮、运行状态、当前进度和焦点环，保持稀缺。
-- 深色背景 `#020617` 只用于日志面板。
-- 字体使用 Inter 单一家族，等宽字体仅用于日志时间戳和事件类型。
-- 状态指示必须同时使用颜色 + 文字/百分比，不单独依赖颜色。
-- 遵循 `prefers-reduced-motion: reduce`。
+- 环境变量：`IMAGES_DIR`（容器内图片工作区，默认 `/data/images`）、`HOST_IMAGES_DIR`（宿主机侧 images 路径，用于绝对路径换算，默认同 `IMAGES_DIR`）、`MODELS_DIR`（默认 `/data/models`）、`TZ`（默认 `Asia/Shanghai`）。
+- 容器时区设为 `Asia/Shanghai`（UTC+8），日志与 `now_run_id` 目录时间戳均使用本地时间。
+- GPU 默认仅挂载 0；需双 GPU 加速时把 `docker-compose.yml` 的 `device_ids` 改为 `["0","1"]`，并不要同时设置 `count`。
+- 修改端口、挂载路径、环境变量或模型路径语义时，必须同步更新 `README.md`、`AGENTS.md` 和 PR 描述。
+
+## 模型管理
+
+- 模型文件放在 `MODELS_DIR`，可带同名 `.names`/`.txt`/`.json` sidecar 描述类别名。
+- WebUI“上传模型”页可上传 `.onnx` 并刷新列表；模型类别名优先取 sidecar，无 sidecar 时使用 `cls_id`。
 
 ## 测试指南
 
-- 后端测试：`python -m pytest tests/backend -v`。
-- 用户前台测试：在 `frontend/user-app/` 下运行 `npm test`。
-- 管理员后台测试随 `frontend/user-app/` 一起运行。
-- 前端构建验证：在 `frontend/user-app/` 下运行 `npm run build`。
-- 修改 API 契约时，补充或更新 `tests/backend/test_*_api.py` 与前端 `src/api/client.ts` 附近的调用测试。
-- 修改任务调度、归档解压或推理执行时，优先覆盖 `test_archive_ingest.py`、`test_scheduler.py`、`test_task_runner.py`。
+- webui 测试：`python -m pytest tests/webui -v`。
+- 修改推理执行、归档解压或打包时，优先覆盖 `test_archive_ingest.py`、`test_package.py`、`test_gpu_assign.py`、`test_label_and_postprocess.py`。
 - 未执行的测试必须在回复、提交说明或 PR 描述中明确标注“未执行”并说明原因，不得编造结果。
 
 ## 提交与 PR 工作规范
@@ -227,19 +176,17 @@ git remote -v
 提交信息格式示例：
 
 ```text
-fix(调度器): 避免活跃任务被兜底超时误标记
+feat(webui): 支持上传 zip 压缩包自动解压回填推理目录
 
-processing 任务兜底超时统一改用 runtime.workers.timeout，并在任务仍由当前 active worker 持有时跳过终态转换，避免运行中的 worker 任务被误判为超时。
+上传图片页支持 .zip 压缩包，后台调用 extract_upload_archive 自动解压仅保留受支持图片，并把解压目录回填到推理输入框。
 
 技术方案：
-- 移除 `database.task_timeout_minutes` 独立配置与数据库超时重置入口
-- 统一 worker 进程超时和 processing 任务兜底超时的秒级配置
-- 补充 active worker 持有任务时跳过超时标记的单元测试
+- 新增 webui/archive_ingest.py，移植安全解压逻辑（路径遍历防护 + 原子替换）
+- webui/app.py 区分 zip 与图片，解压后回填相对目录
+- 补充 tests/webui/test_archive_ingest.py
 
 影响范围：
-- 任务调度器
-- 配置管理
-- 配置页面
+- webui 推理工具链
 - 单元测试
 ```
 
@@ -275,8 +222,7 @@ PR 描述必须包含以下内容：
 - 说明核心行为变化
 
 ## 测试
-- `python -m pytest tests/backend -v`：通过 / 失败，失败原因为 ...
-- `npm test`（frontend/user-app）：通过 / 失败，失败原因为 ...
+- `python -m pytest tests/webui -v`：通过 / 失败，失败原因为 ...
 
 ## 端口 / 路径变更
 - 无
@@ -286,9 +232,9 @@ PR 描述必须包含以下内容：
 
 ```md
 ## 端口 / 路径变更
-- 新增路由：`/api/tasks/:id/retry`
-- 修改配置：`YOLO_PLATFORM_RUNTIME_ROOT`
-- 修改挂载：`./runtime:/app/runtime`
+- 新增环境变量：`HOST_IMAGES_DIR`
+- 修改挂载：`/data/xxx/images:/data/images`
+- 修改端口：对外暴露 `7860`
 ```
 
 截图或日志要求：
@@ -301,13 +247,6 @@ PR 描述必须包含以下内容：
 如涉及 UI、交互、报错修复或运行日志，需补充对应截图或关键日志片段。
 
 关联 Issue 要求：
-
-```md
-## 关联 Issue
-- Closes #123
-```
-
-没有关联 Issue 时填写：
 
 ```md
 ## 关联 Issue
@@ -371,6 +310,4 @@ PR 创建后，需要轮询等待 PR 审查评论。
 
 ## 相关文档
 
-- `README.md`：更详细的使用说明、API 摘要、兼容与边界。
-- `DESIGN.md`：完整设计系统、颜色、排版、组件规范。
-- `PRODUCT.md`：产品定位、用户、设计原则、无障碍目标。
+- `README.md`：更详细的使用说明、环境变量、启动方式与输出结构。

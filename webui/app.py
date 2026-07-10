@@ -7,8 +7,10 @@ from typing import Generator, List, Optional, Tuple
 
 import gradio as gr
 
+from webui.archive_ingest import extract_upload_archive
 from webui.job_manager import get_job_manager
 from webui.processing import (
+    PackageProgress,
     format_seconds_human,
     InferenceProgress,
     InferenceSummary,
@@ -20,9 +22,9 @@ from webui.utils import (
     data_dir_from_env,
     ensure_relative,
     get_logger,
-    iter_subdirs,
     list_models,
     now_run_id,
+    resolve_images_dir,
     sanitize_filename,
     unique_path,
 )
@@ -32,6 +34,9 @@ logger = get_logger(__name__)
 
 IMAGES_DIR = data_dir_from_env("IMAGES_DIR", "/data/images")
 MODELS_DIR = data_dir_from_env("MODELS_DIR", "/data/models")
+# 宿主机侧的 images 目录（被挂载到容器内 IMAGES_DIR），用于把用户输入的宿主机
+# 绝对路径换算为容器内路径。未配置时回退为 IMAGES_DIR 本身。
+HOST_IMAGES_DIR = data_dir_from_env("HOST_IMAGES_DIR", str(IMAGES_DIR))
 
 
 def _ensure_dirs() -> None:
@@ -46,9 +51,18 @@ def _model_choices() -> List[str]:
 
 
 def _imageset_choices() -> List[str]:
-    choices = iter_subdirs(IMAGES_DIR, max_depth=3)
-    filtered = [p for p in choices if not p.startswith("output") and not p.startswith("uploads")]
-    return filtered
+    """仅枚举 IMAGES_DIR（被挂载目录）的直接子目录，和根目录无关。
+
+    排除 output/uploads 运行产物，避免列表里混入系统目录。
+    """
+    choices = []
+    for name in (list(IMAGES_DIR.iterdir()) if IMAGES_DIR.exists() else []):
+        if not name.is_dir():
+            continue
+        if name.name in ("output", "uploads"):
+            continue
+        choices.append(str(name))
+    return sorted(choices)
 
 
 def _load_names_for_model(model_name: str) -> List[str]:
@@ -128,14 +142,29 @@ def upload_model(file_obj, overwrite: bool) -> Tuple[str, gr.Dropdown]:
     return f"模型已保存: {dest.name}", gr.Dropdown(choices=_model_choices(), value=dest.name)
 
 
+def _looks_like_zip(path: Path) -> bool:
+    return path.suffix.lower() == ".zip"
+
+
+def resolve_images_input(value: str) -> Optional[Path]:
+    return resolve_images_dir(value, IMAGES_DIR, host_images_dir=HOST_IMAGES_DIR)
+
+
 def upload_images(
     files: Optional[List],
     target_subdir: str,
     rename_on_conflict: bool,
-) -> Tuple[str, str]:
+) -> Generator[Tuple[str, str], None, None]:
+    """上传图片或 .zip 压缩包。
+
+    - 图片：逐文件复制到目标目录（沿用旧行为）。
+    - .zip：后台自动解压（仅保留受支持的图片扩展名），完成后把解压目录（相对 images/）
+      自动回填到推理输入框。
+    """
     _ensure_dirs()
     if not files:
-        return "未选择图片", ""
+        yield "未选择文件", ""
+        return
 
     rel = ensure_relative(target_subdir)
     if rel:
@@ -144,12 +173,37 @@ def upload_images(
         dest_dir = IMAGES_DIR / "uploads" / now_run_id()
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    saved = 0
+    zip_count = 0
+    img_count = 0
     skipped = 0
+    final_rel = ""
+    final_set = False
+
     for f in files:
         src_path = Path(getattr(f, "name", "")).expanduser().resolve()
         if not src_path.exists():
             continue
+
+        if _looks_like_zip(src_path):
+            zip_count += 1
+            # 压缩包每次重新上传并解压到一个独立子目录，避免互相覆盖。
+            extract_dir = dest_dir / (src_path.stem or now_run_id())
+            extract_dir = unique_path(extract_dir)
+            try:
+                extract_upload_archive(src_path, extract_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("压缩包解压失败")
+                yield f"压缩包解压失败: {exc}", ""
+                return
+            if not final_set:
+                try:
+                    final_rel = str(extract_dir.resolve().relative_to(IMAGES_DIR))
+                except Exception:  # noqa: BLE001
+                    final_rel = str(extract_dir)
+                final_set = True
+            continue
+
+        # 普通图片：逐文件复制
         dest = dest_dir / sanitize_filename(src_path.name)
         if dest.exists() and not rename_on_conflict:
             skipped += 1
@@ -157,10 +211,17 @@ def upload_images(
         if dest.exists() and rename_on_conflict:
             dest = unique_path(dest)
         shutil.copy2(str(src_path), str(dest))
-        saved += 1
+        img_count += 1
 
-    rel_out = str(dest_dir.relative_to(IMAGES_DIR))
-    return f"已保存图片: {saved}，跳过: {skipped}，目录: {rel_out}", rel_out
+    if not final_set:
+        try:
+            final_rel = str(dest_dir.resolve().relative_to(IMAGES_DIR))
+        except Exception:  # noqa: BLE001
+            final_rel = str(dest_dir)
+        final_set = True
+
+    summary = f"已保存图片: {img_count}，解压压缩包: {zip_count}，跳过: {skipped}，目录: {final_rel}"
+    yield summary, final_rel
 
 
 def run_job(
@@ -183,26 +244,32 @@ def run_job(
     save_txt: bool,
     use_cpu: bool,
     progress=gr.Progress(),
-) -> Generator[Tuple[str, Optional[str], str], None, None]:
+) -> Generator[Tuple[str, Optional[str], str, float, float], None, None]:
+    """运行推理。流式产出：(状态文本, zip下载, 输出目录, 推理进度, 打包进度)。"""
     _ensure_dirs()
     model_name = (model_name or "").strip()
     images_rel = (images_rel or "").strip()
 
     if not model_name:
-        yield "请先选择/上传模型", None, ""
+        yield "请先选择/上传模型", None, "", 0.0, 0.0
         return
     model_path = (MODELS_DIR / model_name).resolve()
     if not model_path.exists():
-        yield f"模型不存在: {model_name}", None, ""
+        yield f"模型不存在: {model_name}", None, "", 0.0, 0.0
         return
 
-    rel = ensure_relative(images_rel)
-    if not rel:
-        yield "图片目录必须是相对路径（例如 smoke-00434/images 或 uploads/xxx）", None, ""
+    images_dir = resolve_images_input(images_rel)
+    if images_dir is None:
+        yield "图片目录不能为空", None, "", 0.0, 0.0
         return
-    images_dir = (IMAGES_DIR / rel).resolve()
     if not images_dir.exists():
-        yield f"图片目录不存在: {rel}", None, ""
+        yield (
+            f"图片目录不存在: {images_rel}（当前解析为 {images_dir}）",
+            None,
+            "",
+            0.0,
+            0.0,
+        )
         return
 
     run_id = now_run_id()
@@ -231,6 +298,7 @@ def run_job(
 
     execution_device = "cpu" if bool(use_cpu) else "auto"
     progress_status = {"text": "准备开始推理...", "processed": 0, "total": 0}
+    pkg_status = {"pct": 0.0, "desc": ""}
     job_manager = get_job_manager()
 
     def _format_progress_text(progress_info: InferenceProgress) -> str:
@@ -286,7 +354,14 @@ def run_job(
         else:
             progress(None, desc=progress_status["text"])
 
-    yield progress_status["text"], None, ""
+    def _infer_pct() -> float:
+        total = int(progress_status["total"])
+        if total > 0:
+            return min(max(float(progress_status["processed"]) / float(total), 0.0), 1.0)
+        return 0.0
+
+    # 产出初值：推理条归零，打包条不出现（0.0）。
+    yield progress_status["text"], None, "", 0.0, 0.0
 
     try:
         job_id = job_manager.submit(
@@ -337,7 +412,7 @@ def run_job(
                     eta_sec=data.get("eta_sec"),
                 )
                 _on_progress(progress_info)
-                yield progress_status["text"], None, ""
+                yield progress_status["text"], None, "", _infer_pct(), 0.0
             elif event_type == "result":
                 summary_data = data.get("summary")
             elif event_type == "error":
@@ -379,25 +454,41 @@ def run_job(
             fail_text = f"{fail_text}\n推理失败: {exc}"
         else:
             fail_text = f"推理失败: {exc}"
-        yield fail_text, None, ""
+        yield fail_text, None, "", 0.0, 0.0
         return
+
+    # 推理完成：推理进度条定满，打包条仍为 0。
+    yield progress_status["text"], None, "", 1.0, 0.0
 
     zip_tmp: Optional[str] = None
     zip_saved_rel = ""
     if do_package:
         try:
-            progress_status["text"] = "推理完成，正在打包输出文件..."
-            progress(None, desc=progress_status["text"])
-            pkg: PackageSummary = package_output_dir(Path(summary.out_dir))
+            def _on_package_progress(pkg_info: PackageProgress) -> None:
+                if pkg_info.total > 0:
+                    pkg_status["pct"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
+                else:
+                    pkg_status["pct"] = 0.0
+                pkg_status["desc"] = f"打包中：{pkg_info.processed}/{pkg_info.total} 个文件，进度 {pkg_status['pct'] * 100:.1f}%"
+
+            _on_package_progress(PackageProgress(processed=0, total=0))
+            yield progress_status["text"], None, "", 1.0, pkg_status["pct"]
+
+            pkg: PackageSummary = package_output_dir(
+                Path(summary.out_dir),
+                progress_callback=_on_package_progress,
+            )
             zip_tmp = pkg.zip_tmp_path
             try:
                 zip_saved_rel = str(Path(pkg.zip_saved_path).resolve().relative_to(IMAGES_DIR))
             except Exception:  # noqa: BLE001
                 zip_saved_rel = pkg.zip_saved_path
+            yield progress_status["text"], None, "", 1.0, 1.0
         except Exception as exc:  # noqa: BLE001
             logger.exception("打包失败")
             zip_tmp = None
             zip_saved_rel = f"打包失败: {exc}"
+            yield progress_status["text"], None, "", 1.0, 0.0
 
     by_label = sorted(summary.by_label.items(), key=lambda x: (-x[1], x[0]))
     stats = "，".join([f"{k}:{v}" for k, v in by_label])
@@ -443,7 +534,7 @@ def run_job(
 
     progress_status["text"] = f"推理完成：已处理 {summary.total}/{summary.total} 张，剩余 0 张，推理设备：{device_text}"
     progress(1.0, desc=progress_status["text"])
-    yield text, zip_tmp, out_rel
+    yield text, zip_tmp, out_rel, 1.0, 1.0 if do_package and zip_tmp else 0.0
 
 
 def _output_run_choices() -> List[str]:
@@ -453,31 +544,43 @@ def _output_run_choices() -> List[str]:
     return sorted([p.name for p in root.iterdir() if p.is_dir()])
 
 
-def package_only(out_rel: str) -> Tuple[str, Optional[str]]:
+def package_only(out_rel: str) -> Generator[Tuple[str, Optional[str], float], None, None]:
     _ensure_dirs()
     rel = ensure_relative(out_rel)
     if not rel:
-        return "输出目录必须是相对路径（例如 output/20251225_091307）", None
+        yield "输出目录必须是相对路径（例如 output/20251225_091307）", None, 0.0
+        return
     out_dir = (IMAGES_DIR / rel).resolve()
+
+    pkg_pct = {"value": 0.0}
+
+    def _on_pkg(pkg_info: PackageProgress) -> None:
+        if pkg_info.total > 0:
+            pkg_pct["value"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
+        yield_pkg = pkg_pct["value"]  # noqa: F841
+
     try:
-        pkg = package_output_dir(out_dir)
+        yield "开始打包...", None, 0.0
+        pkg = package_output_dir(out_dir, progress_callback=_on_pkg)
+        yield f"打包进度：{pkg_pct['value'] * 100:.1f}%", None, pkg_pct["value"]
     except Exception as exc:  # noqa: BLE001
         logger.exception("打包失败")
-        return f"打包失败: {exc}", None
+        yield f"打包失败: {exc}", None, 0.0
+        return
 
     try:
         saved_rel = str(Path(pkg.zip_saved_path).resolve().relative_to(IMAGES_DIR))
     except Exception:  # noqa: BLE001
         saved_rel = pkg.zip_saved_path
 
-    return f"打包完成：{saved_rel}", pkg.zip_tmp_path
+    yield f"打包完成：{saved_rel}", pkg.zip_tmp_path, 1.0
 
 
 def build_app() -> gr.Blocks:
     _ensure_dirs()
 
     with gr.Blocks(title="YOLO ONNX 推理归档 WebUI") as demo:
-        gr.Markdown("### YOLO ONNX 推理归档 WebUI（上传模型/图片 → 推理 → 按类别归档）")
+        gr.Markdown("### YOLO ONNX 推理归档 WebUI（上传模型/图片/zip → 推理 → 按类别归档）")
 
         with gr.Tab("上传模型"):
             model_file = gr.File(label="选择 .onnx 模型文件", file_count="single")
@@ -493,13 +596,17 @@ def build_app() -> gr.Blocks:
             )
 
         with gr.Tab("上传图片"):
-            img_files = gr.File(label="选择图片（可多选）", file_count="multiple")
+            gr.Markdown(
+                "支持直接上传图片，或上传 `.zip` 压缩包（后台自动解压仅保留受支持图片，"
+                "完成后会把解压目录自动填入下方“图片目录”）。"
+            )
+            img_files = gr.File(label="选择图片或 .zip（可多选）", file_count="multiple")
             target_subdir = gr.Textbox(
                 label="保存到 images 下的相对目录（可选）",
                 placeholder="例如：smoke-00434/images 或 uploads/custom_set",
             )
             img_rename = gr.Checkbox(label="重名时生成新文件名（否则跳过）", value=True)
-            upload_imgs_btn = gr.Button("上传图片")
+            upload_imgs_btn = gr.Button("上传图片 / 解压 zip")
             img_status = gr.Textbox(label="状态", interactive=False)
             images_rel_out = gr.Textbox(label="图片目录（相对路径，用于推理）", interactive=False)
 
@@ -515,11 +622,14 @@ def build_app() -> gr.Blocks:
                 refresh_models_btn = gr.Button("刷新模型列表")
             with gr.Row():
                 images_rel = gr.Textbox(
-                    label="图片目录（相对 images/）",
-                    placeholder="例如：smoke-00434/images 或 uploads/20250101_120000",
+                    label="图片目录（相对 images/ 或宿主机绝对路径）",
+                    placeholder="例如：smoke-00434/images 或宿主机绝对路径（需与挂载目录一致）",
                 )
-                imageset_dropdown = gr.Dropdown(label="快捷选择已有目录（可选）", choices=_imageset_choices())
+                imageset_dropdown = gr.Dropdown(label="快捷选择已有目录（可选）", choices=[], multiselect=False)
+                refresh_imageset_btn = gr.Button("刷新快捷目录")
                 use_imageset_btn = gr.Button("填入选择")
+            infer_progress_bar = gr.Slider(0, 100, value=0, step=0.1, label="推理进度（%）", interactive=False)
+            package_progress_bar = gr.Slider(0, 100, value=0, step=0.1, label="打包进度（%）", interactive=False)
             with gr.Row():
                 model_type = gr.Radio(
                     label="模型类型",
@@ -551,7 +661,7 @@ def build_app() -> gr.Blocks:
             with gr.Row():
                 recursive = gr.Checkbox(label="递归扫描子目录", value=True)
                 strict_hardlink = gr.Checkbox(label="必须硬链接（失败即报错）", value=True)
-                do_package = gr.Checkbox(label="推理结束后打包 zip", value=False)
+                do_package = gr.Checkbox(label="推理结束后打包 zip（-0 不压缩）并下载", value=False)
             with gr.Row():
                 preprocess_workers = gr.Slider(1, 16, value=4, step=1, label="预处理线程数（解码/缩放）")
                 prefetch_batches = gr.Slider(0, 8, value=2, step=1, label="预取 batch 数（解码与 GPU 重叠）")
@@ -564,11 +674,15 @@ def build_app() -> gr.Blocks:
             out_zip = gr.File(label="下载输出 zip（output/<run_id>.zip）", interactive=False)
             out_rel_dir = gr.Textbox(label="输出目录（相对 images/）", interactive=False)
 
+            def _set_imageset_choices():
+                return gr.Dropdown(choices=_imageset_choices())
+
             refresh_models_btn.click(
                 lambda: gr.Dropdown(choices=_model_choices()),
                 inputs=[],
                 outputs=[model_name],
             )
+            refresh_imageset_btn.click(_set_imageset_choices, inputs=[], outputs=[imageset_dropdown])
             use_imageset_btn.click(lambda x: x, inputs=[imageset_dropdown], outputs=[images_rel])
             images_rel_out.change(lambda x: x, inputs=[images_rel_out], outputs=[images_rel])
 
@@ -605,28 +719,34 @@ def build_app() -> gr.Blocks:
                     save_txt,
                     use_cpu,
                 ],
-                outputs=[out_text, out_zip, out_rel_dir],
+                outputs=[out_text, out_zip, out_rel_dir, infer_progress_bar, package_progress_bar],
             )
 
         with gr.Tab("单独打包"):
             with gr.Row():
-                out_run = gr.Dropdown(label="选择 output 运行目录（run_id）", choices=_output_run_choices())
+                out_run = gr.Dropdown(label="选择 output 运行目录（run_id）", choices=[])
                 refresh_out_btn = gr.Button("刷新")
             out_rel = gr.Textbox(label="输出目录（相对 images/）", placeholder="例如：output/20251225_091307")
             fill_btn = gr.Button("填入选择")
             pkg_btn = gr.Button("开始打包")
             pkg_status = gr.Textbox(label="状态", interactive=False)
             pkg_zip = gr.File(label="下载 zip（临时文件）", interactive=False)
+            pkg_progress_only = gr.Slider(0, 100, value=0, step=0.1, label="打包进度（%）", interactive=False)
 
-            refresh_out_btn.click(lambda: gr.Dropdown(choices=_output_run_choices()), inputs=[], outputs=[out_run])
+            def _set_output_run_choices():
+                return gr.Dropdown(choices=_output_run_choices())
+
+            refresh_out_btn.click(_set_output_run_choices, inputs=[], outputs=[out_run])
             fill_btn.click(lambda x: f"output/{x}" if x else "", inputs=[out_run], outputs=[out_rel])
-            pkg_btn.click(package_only, inputs=[out_rel], outputs=[pkg_status, pkg_zip])
+            pkg_btn.click(package_only, inputs=[out_rel], outputs=[pkg_status, pkg_zip, pkg_progress_only])
 
         with gr.Accordion("运行环境", open=False):
             gr.Markdown(
-                f"- `IMAGES_DIR`: `{IMAGES_DIR}`\n"
+                f"- `IMAGES_DIR`(容器内): `{IMAGES_DIR}`\n"
+                f"- `HOST_IMAGES_DIR`(宿主机侧): `{HOST_IMAGES_DIR}`\n"
                 f"- `MODELS_DIR`: `{MODELS_DIR}`\n"
-                f"- 模型列表：{', '.join(_model_choices()) or '(空)'}"
+                f"- 模型列表：{', '.join(_model_choices()) or '(空)'}\n"
+                f"- 图片目录支持相对 `images/` 或宿主机绝对路径；`.zip` 上传后自动解压回填。"
             )
 
     return demo

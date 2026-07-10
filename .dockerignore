@@ -8,11 +8,7 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .venv
-node_modules
-frontend/user-app/node_modules
-frontend/user-app/dist
-frontend/admin-app/node_modules
-frontend/admin-app/dist
 runtime
-images
+images/output
+images/uploads
 *.tsbuildinfo
