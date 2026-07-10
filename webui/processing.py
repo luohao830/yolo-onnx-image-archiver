@@ -480,7 +480,7 @@ def _schedule_delete(path: Path, delay_sec: int = 300) -> None:
     t.start()
 
 
-def _iter_package_files(out_dir: Path):
+def _iter_package_files(out_dir: Path) -> list[tuple[Path, Path]]:
     """递归收集 out_dir 下所有文件，返回 (相对 zip 路径, 绝对路径) 列表。"""
     files = []
     for root, _dirs, names in os.walk(out_dir):
@@ -1251,3 +1251,4 @@ def run_inference(
         by_label=by_label,
         out_dir=str(out_dir),
     )
+

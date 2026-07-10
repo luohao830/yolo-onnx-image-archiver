@@ -105,33 +105,47 @@ def resolve_images_dir(
     """把用户输入的图片目录解析为容器内实际目录，兼容三种输入：
 
     1. 相对 images_dir 的子路径（如 uploads/20250101）→ images_dir/rel；
-    2. 容器内绝对路径（/data/images 或其子目录）→ 直接 resolve；
-    3. 宿主机绝对路径（如 /home/xxx/images/smoke-set）→ 若配置了
-       host_images_dir（该目录被挂载到容器内 images_dir），把宿主机前缀
-       替换为容器内前缀后使用。
+    2. 宿主机绝对路径（如 /host/images/smoke-set）→ 若配置了 host_images_dir
+       （宿主机侧路径，被挂载到容器内 images_dir），把宿主机前缀替换为容器内前缀；
+    3. 容器内绝对路径 → 限定在 images_dir 子树内。
 
-    返回 None 表示输入为空或无法解析的相对路径。
+    安全：相对路径先经 ensure_relative 拦截 `..`，再校验 resolve() 后仍在
+    images_dir 子树内（防 symlink 逃逸）；绝对路径不在允许范围时返回 None，
+    不回退到任意路径。
     """
     raw = (path_text or "").strip()
     if not raw:
         return None
 
+    images_root = images_dir.resolve()
+
     candidate = Path(raw)
     if candidate.is_absolute():
         resolved = candidate.expanduser().resolve()
-        # 宿主机绝对路径换算：把已知宿主机挂载前缀替换为容器内 images_dir
         if host_images_dir is not None:
-            host_prefix = Path(str(host_images_dir)).expanduser().resolve()
+            host_prefix = host_images_dir.expanduser().resolve()
             try:
                 rel_to_host = resolved.relative_to(host_prefix)
             except ValueError:
-                rel_to_host = None
-            if rel_to_host is not None:
-                return (images_dir / rel_to_host).resolve()
+                # 不在允许的宿主机挂载目录范围内，拒绝访问
+                return None
+            return (images_dir / rel_to_host).resolve()
+        # 未配置 host_images_dir：仅允许 images_dir 子树内的容器绝对路径
+        try:
+            resolved.relative_to(images_root)
+        except ValueError:
+            return None
         return resolved
 
     rel = ensure_relative(raw)
     if rel is None:
         return None
-    return (images_dir / rel).resolve()
+    resolved = (images_dir / rel).resolve()
+    try:
+        resolved.relative_to(images_root)
+    except ValueError:
+        # resolve() 跟随符号链接后逃逸出 images_dir，拒绝
+        return None
+    return resolved
+
 
