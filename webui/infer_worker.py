@@ -1,17 +1,40 @@
 from __future__ import annotations
 
-import json
-import multiprocessing as mp
+import logging
+import os
 import queue
 import traceback
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from webui.processing import InferenceSummary, run_inference
 from webui.utils import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def detect_available_gpus() -> int:
+    """检测可见的 CUDA GPU 数量。
+
+    以 `CUDA_VISIBLE_DEVICES` 为准（docker-compose 通过 device_ids 显式挂载 0/1 时，
+    NVIDIA runtime 会把该变量设置成可见设备列表）。无 CUDA EP 或变量为空时，
+    按已知挂载策略视作 1 块；明确无 GPU 时返回 0。
+    """
+    try:
+        import onnxruntime as ort  # noqa: WPS433
+
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            return 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if not visible:
+        # 未显式限定：默认按 1 块处理（与单 GPU 挂载一致）。
+        return 1
+    parts = [p for p in visible.replace(" ", "").split(",") if p != ""]
+    return len(parts)
 
 
 def _serialize_summary(summary: InferenceSummary) -> Dict[str, Any]:
@@ -41,8 +64,22 @@ def _serialize_summary(summary: InferenceSummary) -> Dict[str, Any]:
     }
 
 
-def _worker_loop(request_queue: "mp.Queue[Dict[str, Any]]", event_queue: "mp.Queue[Dict[str, Any]]") -> None:
-    logger.info("推理 worker 已启动")
+def _worker_loop(
+    request_queue: "queue.Queue[Dict[str, Any]]",
+    event_queue: "queue.Queue[Dict[str, Any]]",
+    gpu_index: Optional[int],
+) -> None:
+    """推理 worker 循环。
+
+    gpu_index 非 None 时，把该 worker 的 CUDA 设备可见性限定为单块（str(gpu_index)），
+    实现任务级多 GPU 分流：不同 worker 进程绑定不同 GPU，并发执行任务。
+    """
+    if gpu_index is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_index)
+        logger.info("推理 worker 已启动，绑定 GPU %s", gpu_index)
+    else:
+        logger.info("推理 worker 已启动（CPU 或单 GPU）")
+
     while True:
         job = request_queue.get()
         if not isinstance(job, dict):
@@ -112,14 +149,17 @@ def _worker_loop(request_queue: "mp.Queue[Dict[str, Any]]", event_queue: "mp.Que
 
 
 def create_worker_process(
-    request_queue: "mp.Queue[Dict[str, Any]]",
-    event_queue: "mp.Queue[Dict[str, Any]]",
-) -> mp.Process:
+    request_queue,
+    event_queue,
+    gpu_index: Optional[int] = None,
+):
+    import multiprocessing as mp
+
     ctx = mp.get_context("spawn")
     process = ctx.Process(
         target=_worker_loop,
-        args=(request_queue, event_queue),
+        args=(request_queue, event_queue, gpu_index),
         daemon=True,
-        name="yolo-infer-worker",
+        name=f"yolo-infer-worker-gpu{gpu_index}" if gpu_index is not None else "yolo-infer-worker",
     )
     return process

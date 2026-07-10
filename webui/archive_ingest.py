@@ -12,6 +12,10 @@ SUPPORTED_IMAGE_SUFFIXES = frozenset(
 
 
 def extract_upload_archive(archive_path: Path, out_dir: Path) -> list[Path]:
+    """把上传的 .zip 安全解压到 out_dir，仅保留受支持的图片扩展名。
+
+    使用临时目录原子替换，避免半截解压留下脏数据。返回解压后的图片绝对路径列表。
+    """
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     resolved_out_dir = out_dir.resolve()
     members: list[tuple[zipfile.ZipInfo, Path]] = []

@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -69,6 +70,13 @@ class PackageSummary:
     out_dir: str
     zip_tmp_path: str
     zip_saved_path: str
+
+
+@dataclass(frozen=True)
+class PackageProgress:
+    """打包进度：已写入文件数 / 待打包总文件数。"""
+    processed: int
+    total: int
 
 
 @dataclass(frozen=True)
@@ -472,14 +480,44 @@ def _schedule_delete(path: Path, delay_sec: int = 300) -> None:
     t.start()
 
 
-def package_output_dir(out_dir: Path, *, keep_tmp_seconds: int = 300) -> PackageSummary:
+def _iter_package_files(out_dir: Path):
+    """递归收集 out_dir 下所有文件，返回 (相对 zip 路径, 绝对路径) 列表。"""
+    files = []
+    for root, _dirs, names in os.walk(out_dir):
+        for name in names:
+            abs_path = Path(root) / name
+            arcname = abs_path.relative_to(out_dir)
+            files.append((arcname, abs_path))
+    return files
+
+
+def package_output_dir(
+    out_dir: Path,
+    *,
+    keep_tmp_seconds: int = 300,
+    progress_callback: Optional[Callable[[PackageProgress], None]] = None,
+) -> PackageSummary:
+    """把输出目录打包为 zip（ZIP_STORED，等价 `zip -r -0`，只打包不压缩）。
+
+    progress_callback 在写入每个文件后回调，传递 PackageProgress(processed, total)。
+    """
     out_dir = out_dir.expanduser().resolve()
     if not out_dir.exists() or not out_dir.is_dir():
         raise ValueError(f"输出目录不存在: {out_dir}")
 
+    files = _iter_package_files(out_dir)
+    total = len(files)
+
     tmp_dir = Path(tempfile.gettempdir()).resolve()
-    zip_base = unique_path(tmp_dir / out_dir.name)
-    zip_tmp = Path(shutil.make_archive(str(zip_base), "zip", root_dir=str(out_dir))).resolve()
+    zip_tmp = unique_path(tmp_dir / out_dir.name).with_suffix(".zip")
+    # ZIP_STORED：不压缩，等价 zip -r -0
+    with zipfile.ZipFile(zip_tmp, "w", compression=zipfile.ZIP_STORED) as zf:
+        processed = 0
+        for arcname, abs_path in files:
+            zf.write(abs_path, arcname, compress_type=zipfile.ZIP_STORED)
+            processed += 1
+            if progress_callback is not None:
+                progress_callback(PackageProgress(processed=processed, total=total))
 
     saved_base = unique_path(out_dir.parent / out_dir.name)
     zip_saved = saved_base.with_suffix(".zip")

@@ -2,65 +2,28 @@
   "language": "Chinese",
   "rules": [
     {
-      "path": "backend/**/*.py",
-      "rule": "请使用中文审查 Python 代码，重点关注：SQL 注入（原始 SQL 或未转义的 f-string 查询）、文件操作中的路径遍历、硬编码密钥或 API 密钥、暴露内部细节的异常处理、用户数据处理前的输入校验缺失、异步代码中的竞态条件，并确保所有函数签名都有正确的类型提示。检查所有数据库查询是否使用参数化语句，敏感操作是否已正确鉴权。",
-      "merge_system_rule": true
-    },
-    {
-      "path": "backend/api/routes/**/*.py",
-      "rule": "请使用中文审查 API 路由，重点关注：管理员端点的鉴权检查缺失或不一致、HTTP 状态码使用不当、错误响应格式不一致、请求体缺少 Pydantic 校验模式、无限制请求大小导致的 DoS 风险、响应 Content-Type 头是否正确。验证管理员路由使用 require_admin 依赖，公开路由不泄露管理员功能。",
-      "merge_system_rule": true
-    },
-    {
-      "path": "backend/db/**/*.py",
-      "rule": "请使用中文审查数据库代码，重点关注：原始查询中的 SQL 注入、Session 生命周期管理（Session 泄漏）、N+1 查询模式、高频查询列缺少索引，并确保模型变更正确反映到数据库模式。检查 SQLAlchemy Session 是否在 finally 块或上下文管理器中正确关闭。",
-      "merge_system_rule": true
-    },
-    {
-      "path": "backend/services/**/*.py",
-      "rule": "请使用中文审查服务层，重点关注：职责分离（只包含业务逻辑，不包含 HTTP 相关逻辑）、错误传播是否正确（不静默吞掉异常）、事务边界是否正确、文件 I/O 是否处理了边界情况（文件缺失、权限错误、磁盘满）。检查长时间运行操作是否可取消并正确报告进度。",
-      "merge_system_rule": true
-    },
-    {
-      "path": "frontend/**/*.{ts,tsx}",
-      "rule": "请使用中文审查前端代码，重点关注：XSS 漏洞（尤其是 dangerouslySetInnerHTML 或直接 DOM 操作）、React Hook 依赖数组缺失（exhaustive-deps）、组件树缺少错误边界、客户端代码中硬编码 API 密钥或 Token、异步状态（loading/error/empty）处理不当、交互元素缺少 ARIA 属性、使用 any 类型而非正确 TypeScript 类型。确保 API 错误响应被正确处理，并向用户展示友好的错误信息。",
-      "merge_system_rule": true
-    },
-    {
-      "path": "frontend/src/api/**/*.ts",
-      "rule": "请使用中文审查 API 客户端代码，重点关注：请求/响应类型是否正确、所有端点的错误处理是否一致、Token 管理是否正确（无硬编码 Token）、基础 URL 配置是否正确、所有 API 调用是否正确处理网络错误和非 2xx 响应。",
-      "merge_system_rule": true
-    },
-    {
-      "path": "gateway/**",
-      "rule": "请使用中文审查 Nginx 配置，重点关注：安全响应头（HSTS、X-Frame-Options、X-Content-Type-Options）是否正确、TLS 配置是否安全、内部服务是否暴露、CORS 设置是否过于宽松、client_max_body_size 是否与后端限制一致。检查 proxy_pass 指令是否存在目录遍历风险。",
+      "path": "webui/**/*.py",
+      "rule": "请使用中文审查 Python 代码，重点关注：文件操作中的路径遍历（解压 .zip、拼接图片目录、宿主机绝对路径换算时对 .. 与绝对路径的防护）、硬编码密钥或 API 密钥、暴露内部细节的异常处理、用户数据处理前的输入校验缺失、多 worker/多 GPU 并发与 CUDA_VISIBLE_DEVICES 环境变量设置的竞态，并确保所有函数签名都有正确的类型提示。检查长时间运行的推理/打包任务是否可正确报告进度、worker 进程崩溃后是否能被重启。",
       "merge_system_rule": true
     },
     {
       "path": "{Dockerfile,docker-compose.yml,docker-compose.*.yml}",
-      "rule": "请使用中文审查 Docker 配置，重点关注：容器是否以 root 运行且未使用 USER 指令、是否暴露不必要的端口、环境变量或构建参数中是否硬编码密钥、是否缺少 HEALTHCHECK、是否使用 latest/无标签基础镜像、生产服务是否设置了正确的重启策略。检查 COPY/ADD 的使用是否符合安全最佳实践。",
+      "rule": "请使用中文审查 Docker 配置，重点关注：容器时区是否正确设置为 Asia/Shanghai、GPU device_ids 挂载是否安全（默认 ['0']，双 GPU 加速改为 ['0','1']）、环境变量或构建参数中是否硬编码密钥、是否暴露不必要的端口（仅 7860）、是否使用 latest/无标签基础镜像、生产服务是否设置了正确的重启策略。检查 COPY/ADD 的使用是否符合安全最佳实践，volume 挂载的宿主机路径是否可控。",
       "merge_system_rule": true
     }
   ],
   "include": [
-    "backend/**/*.py",
-    "frontend/**/*.{ts,tsx}",
-    "gateway/**",
+    "webui/**/*.py",
     "Dockerfile",
     "docker-compose.yml",
     "docker-compose.*.yml"
   ],
   "exclude": [
     "**/__pycache__/**",
-    "**/node_modules/**",
-    "**/dist/**",
     "**/.git/**",
     "runtime/**",
-    "webui/**",
     "models/**",
     "images/**",
-    "**/*.min.js",
-    "**/package-lock.json",
     "**/*.pyc"
   ]
 }
