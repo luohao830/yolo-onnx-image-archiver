@@ -177,8 +177,8 @@ def upload_images(
     zip_count = 0
     img_count = 0
     skipped = 0
+    first_zip_rel = ""
     final_rel = ""
-    final_set = False
 
     for f in files:
         src_path = Path(getattr(f, "name", "")).expanduser().resolve()
@@ -196,12 +196,11 @@ def upload_images(
                 logger.exception("压缩包解压失败")
                 yield f"压缩包解压失败: {exc}", ""
                 return
-            if not final_set:
+            if not first_zip_rel:
                 try:
-                    final_rel = str(extract_dir.resolve().relative_to(IMAGES_DIR))
+                    first_zip_rel = str(extract_dir.resolve().relative_to(IMAGES_DIR))
                 except Exception:  # noqa: BLE001
-                    final_rel = str(extract_dir)
-                final_set = True
+                    first_zip_rel = str(extract_dir)
             continue
 
         # 普通图片：逐文件复制
@@ -214,14 +213,19 @@ def upload_images(
         shutil.copy2(str(src_path), str(dest))
         img_count += 1
 
-    if not final_set:
+    # 回填目录：有图片（含混合上传）回填公共父目录 dest_dir；仅 zip 时回填首个解压目录。
+    if img_count > 0:
         try:
             final_rel = str(dest_dir.resolve().relative_to(IMAGES_DIR))
         except Exception:  # noqa: BLE001
             final_rel = str(dest_dir)
-        final_set = True
+    else:
+        final_rel = first_zip_rel
 
-    summary = f"已保存图片: {img_count}，解压压缩包: {zip_count}，跳过: {skipped}，目录: {final_rel}"
+    if img_count > 0 and zip_count > 0:
+        summary = f"已保存图片: {img_count}，解压压缩包: {zip_count}，跳过: {skipped}，目录: {final_rel}（图片在根目录，zip 已解压到子目录）"
+    else:
+        summary = f"已保存图片: {img_count}，解压压缩包: {zip_count}，跳过: {skipped}，目录: {final_rel}"
     yield summary, final_rel
 
 

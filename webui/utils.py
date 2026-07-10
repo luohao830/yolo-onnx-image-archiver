@@ -129,7 +129,13 @@ def resolve_images_dir(
             except ValueError:
                 # 不在允许的宿主机挂载目录范围内，拒绝访问
                 return None
-            return (images_dir / rel_to_host).resolve()
+            result = (images_dir / rel_to_host).resolve()
+            try:
+                result.relative_to(images_root)
+            except ValueError:
+                # resolve() 跟随符号链接后逃逸出 images_dir，拒绝
+                return None
+            return result
         # 未配置 host_images_dir：仅允许 images_dir 子树内的容器绝对路径
         try:
             resolved.relative_to(images_root)

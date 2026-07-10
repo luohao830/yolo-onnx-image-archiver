@@ -109,7 +109,7 @@ python3 -m py_compile webui/*.py
   - 相对路径 → `images_dir/rel`。
   - 宿主机绝对路径 → 以 `host_images_dir` 为前缀换算为 `images_dir` 下路径（`HOST_IMAGES_DIR` 环境变量，默认与 `IMAGES_DIR` 相同）。
   - 容器内绝对路径 → 直接 resolve。
-- 在 `docker-compose.yml` 中把 `volumes` 的左侧改为实际宿主机绝对路径，并把 `HOST_IMAGES_DIR` 改为同一路径即可。
+- 在 `docker-compose.yml` 中通过环境变量 `IMAGES_HOST_DIR` 同时设置 images 挂载路径与 `HOST_IMAGES_DIR`（默认回退 `/tmp/yolo_images`，生产环境务必覆盖）即可。
 
 ## 上传与解压
 
@@ -233,7 +233,7 @@ PR 描述必须包含以下内容：
 ```md
 ## 端口 / 路径变更
 - 新增环境变量：`HOST_IMAGES_DIR`
-- 修改挂载：`/data/xxx/images:/data/images`
+- 修改挂载：images 改为 `${IMAGES_HOST_DIR:-/tmp/yolo_images}:/data/images`，并新增 `HOST_IMAGES_DIR=${IMAGES_HOST_DIR:-/tmp/yolo_images}`
 - 修改端口：对外暴露 `7860`
 ```
 
