@@ -13,7 +13,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-images/*
+images
 !images/.gitkeep
 !images/uploads/
 !images/uploads/.gitkeep
