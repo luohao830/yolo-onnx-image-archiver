@@ -380,7 +380,8 @@ def _run_job_impl(
         yield message, None, _progress_update("推理进度", message, 0.0, visible=False), _button_update(running=False)
         return
     if not images_dir.exists():
-        message = f"图片目录不存在: {images_rel}（当前解析为 {images_dir}）"
+        logger.warning("图片目录不存在：输入=%s 解析路径=%s", images_rel, images_dir)
+        message = f"图片目录不存在: {images_rel}"
         yield message, None, _progress_update("推理进度", message, 0.0, visible=False), _button_update(running=False)
         return
 
@@ -461,6 +462,7 @@ def _run_job_impl(
         return 0.0
 
     job_id: Optional[str] = None
+    cancel_job = True
     try:
         job_id = job_manager.submit(
             {
@@ -549,6 +551,7 @@ def _run_job_impl(
             by_label=dict(summary_data["by_label"]),
             out_dir=str(summary_data["out_dir"]),
         )
+        cancel_job = False
     except Exception as exc:  # noqa: BLE001
         logger.exception("推理失败")
         fail_text = progress_status["text"]
@@ -565,6 +568,8 @@ def _run_job_impl(
         return
     finally:
         if job_id is not None:
+            if cancel_job:
+                job_manager.cancel(job_id)
             job_manager.drop(job_id)
 
     # 推理完成：未打包时保持推理进度 100%，打包时稍后切换同一面板。

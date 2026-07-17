@@ -101,9 +101,6 @@ class InferenceJobManager:
         *,
         force: bool = False,
     ) -> None:
-        with self._lock:
-            if self._shutdown:
-                return
         slot = self._slots[idx]
         if expected_process is not None and slot.process is not expected_process:
             return
@@ -174,9 +171,12 @@ class InferenceJobManager:
             pass
 
     def _restart_slot(self, idx: int, expected_process: Optional[mp.Process] = None) -> None:
-        slot = self._slots[idx]
-        with slot.restart_lock:
-            self._restart_slot_locked(idx, expected_process=expected_process)
+        with self._lock:
+            if self._shutdown:
+                return
+            slot = self._slots[idx]
+            with slot.restart_lock:
+                self._restart_slot_locked(idx, expected_process=expected_process)
 
     def _collect_events(self) -> None:
         while not self._shutdown:
@@ -193,7 +193,7 @@ class InferenceJobManager:
 
             with self._lock:
                 job = self._jobs.get(job_id)
-                if job is None:
+                if job is None or job.done:
                     continue
                 job.events.append(event)
                 event_type = event.get("type")
@@ -204,35 +204,31 @@ class InferenceJobManager:
                     job.error = str((event.get("data") or {}).get("message", "推理失败"))
 
     def submit(self, payload: Dict[str, Any]) -> str:
-        # 锁内只做任务编号与 worker 选择，具体队列操作由 slot 锁保护。
+        # 统一使用 manager -> slot 的锁顺序，覆盖关闭检查、登记和队列投递。
         with self._lock:
+            if self._shutdown:
+                raise RuntimeError("推理任务管理器已关闭")
             job_id = uuid.uuid4().hex
             idx = self._next_slot % len(self._slots)
             self._next_slot += 1
+            slot = self._slots[idx]
+            with slot.restart_lock:
+                expected_process = slot.process
+                if not self._process_alive(expected_process):
+                    self._restart_slot_locked(idx, expected_process=expected_process)
+                    slot = self._slots[idx]
 
-        slot = self._slots[idx]
-        with slot.restart_lock:
-            with self._lock:
-                if self._shutdown:
-                    raise RuntimeError("推理任务管理器已关闭")
-            expected_process = slot.process
-            if not self._process_alive(expected_process):
-                self._restart_slot_locked(idx, expected_process=expected_process)
-                slot = self._slots[idx]
-
-            with self._lock:
                 self._jobs[job_id] = JobState(
                     job_id=job_id,
                     worker_index=idx,
                     worker_process=slot.process,
                 )
-            try:
-                slot.request_queue.put(
-                    {"command": "infer", "job_id": job_id, "payload": payload}
-                )
-            except Exception as exc:  # noqa: BLE001
-                message = "推理任务提交失败"
-                with self._lock:
+                try:
+                    slot.request_queue.put(
+                        {"command": "infer", "job_id": job_id, "payload": payload}
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    message = "推理任务提交失败"
                     job = self._jobs.get(job_id)
                     if job is not None:
                         job.error = message
@@ -244,12 +240,12 @@ class InferenceJobManager:
                                 "data": {"message": message},
                             }
                         )
-                self._restart_slot_locked(
-                    idx,
-                    expected_process=slot.process,
-                    force=True,
-                )
-                raise RuntimeError(message) from exc
+                    self._restart_slot_locked(
+                        idx,
+                        expected_process=slot.process,
+                        force=True,
+                    )
+                    raise RuntimeError(message) from exc
         return job_id
 
     def poll_event(self, job_id: str, timeout_sec: float = 0.2) -> Optional[Dict[str, Any]]:
@@ -305,8 +301,34 @@ class InferenceJobManager:
             done = bool(job.done and not job.events)
 
         if restart_idx is not None:
-            self._restart_slot(restart_idx, expected_process=restart_process)
+            try:
+                self._restart_slot(restart_idx, expected_process=restart_process)
+            except Exception:  # noqa: BLE001
+                logger.exception("推理 worker 重启失败，任务已标记为失败")
         return done
+
+    def cancel(self, job_id: str) -> None:
+        """终止任务所属 worker，避免生成器取消后推理继续占用资源。"""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            job.done = True
+            job.events.clear()
+            if not (0 <= job.worker_index < len(self._slots)):
+                return
+            slot = self._slots[job.worker_index]
+            with slot.restart_lock:
+                if self._shutdown:
+                    return
+                try:
+                    self._restart_slot_locked(
+                        job.worker_index,
+                        expected_process=job.worker_process,
+                        force=True,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("取消推理任务时无法重启 worker")
 
     def drop(self, job_id: str) -> None:
         with self._lock:

@@ -509,6 +509,28 @@ def _iter_package_files(out_dir: Path) -> list[tuple[Path, Path]]:
     return files
 
 
+def _reserve_output_zip_path(out_dir: Path) -> Path:
+    """原子预留输出 zip 路径，避免并发打包选择同一个文件名。"""
+    base = out_dir.parent / f"{out_dir.name}.zip"
+    index = 0
+    with _DELETE_TIMERS_LOCK:
+        while True:
+            if index == 0:
+                candidate = base
+            else:
+                candidate = base.with_name(f"{base.stem}_{index}{base.suffix}")
+            try:
+                fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+            except FileExistsError:
+                index += 1
+                continue
+            os.close(fd)
+            previous = _DELETE_TIMERS.pop(candidate, None)
+            if previous is not None:
+                previous.cancel()
+            return candidate
+
+
 def package_output_dir(
     out_dir: Path,
     *,
@@ -558,28 +580,25 @@ def package_output_dir(
                                 total=image_total,
                             )
                         )
+        # 首次打包使用简洁名称，重复或并发打包时分配独立 zip，避免互相覆盖。
+        zip_saved = _reserve_output_zip_path(out_dir)
+        try:
+            shutil.copy2(str(zip_tmp), str(zip_saved))
+        except BaseException:
+            with _DELETE_TIMERS_LOCK:
+                zip_saved.unlink(missing_ok=True)
+            raise
+
+        with _DELETE_TIMERS_LOCK:
+            if keep_tmp_seconds > 0:
+                delay_sec = int(keep_tmp_seconds)
+                _schedule_delete(zip_tmp, delay_sec=delay_sec)
+                _schedule_delete(zip_saved, delay_sec=delay_sec)
+
         if progress_callback is not None:
             progress_callback(
                 PackageProgress(processed=image_total, total=image_total, completed=True)
             )
-
-        # 首次打包使用简洁名称，重复或并发打包时分配独立 zip，避免互相覆盖。
-        with _DELETE_TIMERS_LOCK:
-            zip_saved = unique_path(out_dir.parent / f"{out_dir.name}.zip")
-            try:
-                if zip_saved.resolve() != zip_tmp.resolve():
-                    # 与同路径定时清理共用锁，避免旧 timer 在覆盖后误删新 zip。
-                    shutil.copy2(str(zip_tmp), str(zip_saved))
-                else:
-                    zip_saved = zip_tmp
-            except FileNotFoundError:
-                zip_saved = zip_tmp
-
-            if keep_tmp_seconds > 0:
-                delay_sec = int(keep_tmp_seconds)
-                _schedule_delete(zip_tmp, delay_sec=delay_sec)
-                if zip_saved.resolve() != zip_tmp.resolve():
-                    _schedule_delete(zip_saved, delay_sec=delay_sec)
 
         return PackageSummary(out_dir=str(out_dir), zip_tmp_path=str(zip_tmp), zip_saved_path=str(zip_saved))
     except BaseException:

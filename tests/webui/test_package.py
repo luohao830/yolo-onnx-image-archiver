@@ -37,13 +37,18 @@ def test_package_progress_callback(tmp_path: Path) -> None:
         (out_dir / "c" / f"{i}.jpg").write_bytes(b"x")
 
     seen = []
-    pkg = package_output_dir(
-        out_dir,
-        progress_callback=lambda p: seen.append((p.processed, p.total)),
-    )
+    completed = []
+
+    def _on_progress(progress) -> None:
+        seen.append((progress.processed, progress.total))
+        completed.append(progress.completed)
+
+    pkg = package_output_dir(out_dir, progress_callback=_on_progress)
     assert Path(pkg.zip_saved_path).exists()
-    # 最后一次回调应为全部处理完成
+    # 图片进度达到总数后，还要在 ZIP 保存完成后发送 completed 信号。
     assert seen and seen[-1][0] == seen[-1][1] == 3
+    assert completed[-1] is True
+    assert not any(completed[:-1])
 
 
 def test_package_progress_counts_only_images(tmp_path: Path) -> None:
