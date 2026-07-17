@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
+from html import escape
 from pathlib import Path
 from typing import Generator, List, Optional, Tuple
 
@@ -39,6 +41,54 @@ MODELS_DIR = data_dir_from_env("MODELS_DIR", "/data/models")
 # 绝对路径换算为容器内路径。未配置时回退为 IMAGES_DIR 本身。
 HOST_IMAGES_DIR = data_dir_from_env("HOST_IMAGES_DIR", str(IMAGES_DIR))
 
+_RUN_LOCK = threading.Lock()
+_RUN_BUTTON_IDLE = "开始推理"
+_RUN_BUTTON_BUSY = "推理中，请等待。"
+
+
+def _render_run_progress(stage: str, description: str, pct: float) -> str:
+    """渲染运行推理页唯一的进度面板。"""
+    pct = min(max(float(pct), 0.0), 1.0)
+    title = escape(stage)
+    text = escape(description or "")
+    percent_text = f"{pct * 100:.1f}%"
+    return (
+        '<div class="run-progress-panel" style="padding: 12px 14px; border: 1px solid #e5e7eb; '
+        'border-radius: 8px; background: #fff;">'
+        f'<div style="color: #6b7280; margin-bottom: 8px;">{title}</div>'
+        f'<div style="margin-bottom: 8px; white-space: pre-wrap;">{text}</div>'
+        f'<progress max="1" value="{pct:.6f}" style="width: 100%; height: 12px;">'
+        f"{percent_text}</progress>"
+        f'<div style="text-align: right; color: #6b7280; margin-top: 4px;">{percent_text}</div>'
+        "</div>"
+    )
+
+
+def _progress_update(stage: str, description: str, pct: float, *, visible: bool = True):
+    return gr.update(value=_render_run_progress(stage, description, pct), visible=visible)
+
+
+def _button_update(*, running: bool):
+    return gr.update(
+        value=_RUN_BUTTON_BUSY if running else _RUN_BUTTON_IDLE,
+        interactive=not running,
+    )
+
+
+def _zip_update(
+    path: Optional[str] = None,
+    *,
+    visible: bool = False,
+    display_path: Optional[str] = None,
+):
+    label = f"下载输出 zip（{display_path}）" if display_path else "下载输出 zip"
+    return gr.update(
+        value=path,
+        visible=visible,
+        interactive=visible,
+        label=label,
+    )
+
 
 def _ensure_dirs() -> None:
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
@@ -52,17 +102,21 @@ def _model_choices() -> List[str]:
 
 
 def _imageset_choices() -> List[str]:
-    """仅枚举 IMAGES_DIR（被挂载目录）的直接子目录，和根目录无关。
-
-    排除 output/uploads 运行产物，避免列表里混入系统目录。
-    """
+    """枚举输入目录，uploads 下的上传批次和内层目录全部展示。"""
     choices = []
     for name in (list(IMAGES_DIR.iterdir()) if IMAGES_DIR.exists() else []):
-        if not name.is_dir():
-            continue
-        if name.name in ("output", "uploads"):
+        if not name.is_dir() or name.name == "output":
             continue
         choices.append(str(name))
+        if name.name != "uploads":
+            continue
+
+        for root, dirs, _files in os.walk(name, followlinks=False):
+            root_path = Path(root)
+            dirs[:] = sorted(
+                child for child in dirs if not (root_path / child).is_symlink()
+            )
+            choices.extend(str(root_path / child) for child in dirs)
     return sorted(choices)
 
 
@@ -229,7 +283,7 @@ def upload_images(
     yield summary, final_rel
 
 
-def run_job(
+def _run_job_impl(
     model_name: str,
     images_rel: str,
     model_type: str,
@@ -248,33 +302,29 @@ def run_job(
     draw_boxes: bool,
     save_txt: bool,
     use_cpu: bool,
-    progress=gr.Progress(),
-) -> Generator[Tuple[str, Optional[str], str, float, float], None, None]:
-    """运行推理。流式产出：(状态文本, zip下载, 输出目录, 推理进度, 打包进度)。"""
+) -> Generator[Tuple[str, Optional[str], object, object], None, None]:
+    """运行推理。流式产出：(状态文本, zip下载, 统一进度面板, 开始按钮)。"""
     _ensure_dirs()
     model_name = (model_name or "").strip()
     images_rel = (images_rel or "").strip()
 
     if not model_name:
-        yield "请先选择/上传模型", None, "", 0.0, 0.0
+        yield "请先选择/上传模型", None, _progress_update("推理进度", "请先选择/上传模型", 0.0, visible=False), _button_update(running=False)
         return
     model_path = (MODELS_DIR / model_name).resolve()
     if not model_path.exists():
-        yield f"模型不存在: {model_name}", None, "", 0.0, 0.0
+        message = f"模型不存在: {model_name}"
+        yield message, None, _progress_update("推理进度", message, 0.0, visible=False), _button_update(running=False)
         return
 
     images_dir = resolve_images_input(images_rel)
     if images_dir is None:
-        yield "图片目录不能为空", None, "", 0.0, 0.0
+        message = "图片目录不能为空"
+        yield message, None, _progress_update("推理进度", message, 0.0, visible=False), _button_update(running=False)
         return
     if not images_dir.exists():
-        yield (
-            f"图片目录不存在: {images_rel}（当前解析为 {images_dir}）",
-            None,
-            "",
-            0.0,
-            0.0,
-        )
+        message = f"图片目录不存在: {images_rel}（当前解析为 {images_dir}）"
+        yield message, None, _progress_update("推理进度", message, 0.0, visible=False), _button_update(running=False)
         return
 
     run_id = now_run_id()
@@ -346,18 +396,6 @@ def run_job(
         progress_status["text"] = _format_progress_text(progress_info)
         progress_status["processed"] = progress_info.processed
         progress_status["total"] = progress_info.total
-        if progress_info.stage == "counting":
-            progress(None, desc=progress_status["text"])
-            return
-
-        total_images = int(progress_info.total)
-        if total_images > 0:
-            progress(
-                min(max(float(progress_info.processed) / float(total_images), 0.0), 1.0),
-                desc=progress_status["text"],
-            )
-        else:
-            progress(None, desc=progress_status["text"])
 
     def _infer_pct() -> float:
         total = int(progress_status["total"])
@@ -365,9 +403,7 @@ def run_job(
             return min(max(float(progress_status["processed"]) / float(total), 0.0), 1.0)
         return 0.0
 
-    # 产出初值：推理条归零，打包条不出现（0.0）。
-    yield progress_status["text"], None, "", 0.0, 0.0
-
+    job_id: Optional[str] = None
     try:
         job_id = job_manager.submit(
             {
@@ -417,13 +453,17 @@ def run_job(
                     eta_sec=data.get("eta_sec"),
                 )
                 _on_progress(progress_info)
-                yield progress_status["text"], None, "", _infer_pct(), 0.0
+                yield (
+                    "",
+                    _zip_update(),
+                    _progress_update("推理进度", progress_status["text"], _infer_pct()),
+                    _button_update(running=True),
+                )
             elif event_type == "result":
                 summary_data = data.get("summary")
             elif event_type == "error":
                 error_message = str(data.get("message", "推理失败"))
 
-        job_manager.drop(job_id)
         if error_message:
             raise RuntimeError(error_message)
         if not isinstance(summary_data, dict):
@@ -459,11 +499,24 @@ def run_job(
             fail_text = f"{fail_text}\n推理失败: {exc}"
         else:
             fail_text = f"推理失败: {exc}"
-        yield fail_text, None, "", 0.0, 0.0
+        yield (
+            fail_text,
+            None,
+            _progress_update("推理进度", fail_text, 0.0, visible=False),
+            _button_update(running=False),
+        )
         return
+    finally:
+        if job_id is not None:
+            job_manager.drop(job_id)
 
-    # 推理完成：推理进度条定满，打包条仍为 0。
-    yield progress_status["text"], None, "", 1.0, 0.0
+    # 推理完成：未打包时保持推理进度 100%，打包时稍后切换同一面板。
+    yield (
+        "",
+        _zip_update(),
+        _progress_update("推理进度", progress_status["text"], 1.0),
+        _button_update(running=True),
+    )
 
     zip_tmp: Optional[str] = None
     zip_saved_rel = ""
@@ -471,9 +524,13 @@ def run_job(
         def _on_package_progress(pkg_info: PackageProgress) -> None:
             if pkg_info.total > 0:
                 pkg_status["pct"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
+                pkg_status["desc"] = (
+                    f"打包中：已处理 {pkg_info.processed}/{pkg_info.total} 张图片，"
+                    f"进度 {pkg_status['pct'] * 100:.1f}%"
+                )
             else:
                 pkg_status["pct"] = 0.0
-            pkg_status["desc"] = f"打包中：{pkg_info.processed}/{pkg_info.total} 个文件，进度 {pkg_status['pct'] * 100:.1f}%"
+                pkg_status["desc"] = "打包中：正在准备图片文件..."
 
         # 在后台线程执行打包，生成器轮询共享状态，使打包进度条实时更新
         # （同步阻塞调用会让 yield 无法触发，进度条卡在初值）。
@@ -492,19 +549,35 @@ def run_job(
                 pkg_error.append(exc)
 
         _on_package_progress(PackageProgress(processed=0, total=0))
-        yield progress_status["text"], None, "", 1.0, pkg_status["pct"]
+        yield (
+            "",
+            _zip_update(),
+            _progress_update("打包进度", pkg_status["desc"], 0.0),
+            _button_update(running=True),
+        )
 
         t = threading.Thread(target=_run_package, daemon=True, name="yolo-package")
         t.start()
         while t.is_alive():
             t.join(timeout=0.2)
-            yield progress_status["text"], None, "", 1.0, pkg_status["pct"]
+            yield (
+                "",
+                _zip_update(),
+                _progress_update("打包进度", pkg_status["desc"], pkg_status["pct"]),
+                _button_update(running=True),
+            )
 
         if pkg_error:
             logger.exception("打包失败")
             zip_tmp = None
             zip_saved_rel = f"打包失败: {pkg_error[0]}"
-            yield progress_status["text"], None, "", 1.0, 0.0
+            package_error_text = f"打包失败: {pkg_error[0]}"
+            yield (
+                package_error_text,
+                _zip_update(),
+                _progress_update("打包进度", package_error_text, 0.0, visible=False),
+                _button_update(running=False),
+            )
         else:
             pkg = pkg_result[0]
             zip_tmp = pkg.zip_tmp_path
@@ -512,7 +585,12 @@ def run_job(
                 zip_saved_rel = str(Path(pkg.zip_saved_path).resolve().relative_to(IMAGES_DIR))
             except Exception:  # noqa: BLE001
                 zip_saved_rel = pkg.zip_saved_path
-            yield progress_status["text"], None, "", 1.0, 1.0
+            yield (
+                "",
+                _zip_update(),
+                _progress_update("打包进度", "打包完成", 1.0),
+                _button_update(running=True),
+            )
 
     by_label = sorted(summary.by_label.items(), key=lambda x: (-x[1], x[0]))
     stats = "，".join([f"{k}:{v}" for k, v in by_label])
@@ -557,8 +635,43 @@ def run_job(
     )
 
     progress_status["text"] = f"推理完成：已处理 {summary.total}/{summary.total} 张，剩余 0 张，推理设备：{device_text}"
-    progress(1.0, desc=progress_status["text"])
-    yield text, zip_tmp, out_rel, 1.0, 1.0 if do_package and zip_tmp else 0.0
+    final_stage = "打包进度" if do_package and zip_tmp else "推理进度"
+    final_pct = 1.0 if not do_package or zip_tmp else 0.0
+    final_visible = not (do_package and not zip_tmp)
+    yield (
+        text,
+        _zip_update(
+            zip_tmp,
+            visible=bool(zip_tmp),
+            display_path=zip_saved_rel if zip_tmp else None,
+        ),
+        _progress_update(final_stage, "处理完成" if final_visible else "处理失败", final_pct, visible=final_visible),
+        _button_update(running=False),
+    )
+
+
+def run_job(*args):
+    """串行执行推理任务，并统一控制按钮和进度面板状态。"""
+    if not _RUN_LOCK.acquire(blocking=False):
+        message = "已有推理任务在运行，请等待。"
+        yield (
+            message,
+            _zip_update(),
+            _progress_update("推理进度", message, 0.0),
+            _button_update(running=False),
+        )
+        return
+
+    try:
+        yield (
+            "",
+            _zip_update(),
+            _progress_update("推理进度", "准备开始推理...", 0.0),
+            _button_update(running=True),
+        )
+        yield from _run_job_impl(*args)
+    finally:
+        _RUN_LOCK.release()
 
 
 def _output_run_choices() -> List[str]:
@@ -577,10 +690,17 @@ def package_only(out_rel: str) -> Generator[Tuple[str, Optional[str], float], No
     out_dir = (IMAGES_DIR / rel).resolve()
 
     pkg_pct = {"value": 0.0}
+    pkg_desc = {"value": "开始打包..."}
 
     def _on_pkg(pkg_info: PackageProgress) -> None:
         if pkg_info.total > 0:
             pkg_pct["value"] = min(max(float(pkg_info.processed) / float(pkg_info.total), 0.0), 1.0)
+            pkg_desc["value"] = (
+                f"打包中：已处理 {pkg_info.processed}/{pkg_info.total} 张图片，"
+                f"进度 {pkg_pct['value'] * 100:.1f}%"
+            )
+        else:
+            pkg_desc["value"] = "打包中：正在准备图片文件..."
 
     # 同步 package_output_dir 会阻塞生成器，改为后台线程 + 轮询 yield 实时进度。
     pkg_result: List[PackageSummary] = []
@@ -592,12 +712,12 @@ def package_only(out_rel: str) -> Generator[Tuple[str, Optional[str], float], No
         except BaseException as exc:  # noqa: BLE001
             pkg_error.append(exc)
 
-    yield "开始打包...", None, 0.0
+    yield pkg_desc["value"], None, 0.0
     t = threading.Thread(target=_run_pkg, daemon=True, name="yolo-package-only")
     t.start()
     while t.is_alive():
         t.join(timeout=0.2)
-        yield f"打包进度：{pkg_pct['value'] * 100:.1f}%", None, pkg_pct["value"]
+        yield pkg_desc["value"], None, pkg_pct["value"]
 
     if pkg_error:
         logger.exception("打包失败")
@@ -665,8 +785,6 @@ def build_app() -> gr.Blocks:
                 imageset_dropdown = gr.Dropdown(label="快捷选择已有目录（可选）", choices=[], multiselect=False)
                 refresh_imageset_btn = gr.Button("刷新快捷目录")
                 use_imageset_btn = gr.Button("填入选择")
-            infer_progress_bar = gr.Slider(0, 1, value=0, step=0.01, label="推理进度", interactive=False)
-            package_progress_bar = gr.Slider(0, 1, value=0, step=0.01, label="打包进度", interactive=False)
             with gr.Row():
                 model_type = gr.Radio(
                     label="模型类型",
@@ -698,7 +816,7 @@ def build_app() -> gr.Blocks:
             with gr.Row():
                 recursive = gr.Checkbox(label="递归扫描子目录", value=True)
                 strict_hardlink = gr.Checkbox(label="必须硬链接（失败即报错）", value=True)
-                do_package = gr.Checkbox(label="推理结束后打包 zip（-0 不压缩）并下载", value=False)
+                do_package = gr.Checkbox(label="推理结束后打包 zip（-0 不压缩）并下载", value=True)
             with gr.Row():
                 preprocess_workers = gr.Slider(1, 16, value=4, step=1, label="预处理线程数（解码/缩放）")
                 prefetch_batches = gr.Slider(0, 8, value=2, step=1, label="预取 batch 数（解码与 GPU 重叠）")
@@ -706,20 +824,26 @@ def build_app() -> gr.Blocks:
                 draw_boxes = gr.Checkbox(label="输出画框图片到 <类别>_画框", value=False)
                 save_txt = gr.Checkbox(label="导出 YOLO txt 到 labels/", value=False)
 
-            run_btn = gr.Button("开始推理")
-            out_text = gr.Textbox(label="结果", lines=5, interactive=False)
-            out_zip = gr.File(label="下载输出 zip（output/<run_id>.zip）", interactive=False)
-            out_rel_dir = gr.Textbox(label="输出目录（相对 images/）", interactive=False)
+            run_btn = gr.Button(_RUN_BUTTON_IDLE)
+            run_progress = gr.HTML(value="", visible=False)
+            out_text = gr.Textbox(label="结果（含输出目录）", lines=8, interactive=False)
+            out_zip = gr.DownloadButton(
+                label="下载输出 zip",
+                interactive=False,
+                visible=False,
+            )
 
             def _set_imageset_choices():
                 return gr.Dropdown(choices=_imageset_choices())
 
+            demo.load(_set_imageset_choices, inputs=[], outputs=[imageset_dropdown])
             refresh_models_btn.click(
                 lambda: gr.Dropdown(choices=_model_choices()),
                 inputs=[],
                 outputs=[model_name],
             )
             refresh_imageset_btn.click(_set_imageset_choices, inputs=[], outputs=[imageset_dropdown])
+            imageset_dropdown.change(lambda x: x or "", inputs=[imageset_dropdown], outputs=[images_rel])
             use_imageset_btn.click(lambda x: x, inputs=[imageset_dropdown], outputs=[images_rel])
             images_rel_out.change(lambda x: x, inputs=[images_rel_out], outputs=[images_rel])
 
@@ -756,7 +880,10 @@ def build_app() -> gr.Blocks:
                     save_txt,
                     use_cpu,
                 ],
-                outputs=[out_text, out_zip, out_rel_dir, infer_progress_bar, package_progress_bar],
+                outputs=[out_text, out_zip, run_progress, run_btn],
+                show_progress="hidden",
+                concurrency_limit=1,
+                concurrency_id="run-inference",
             )
 
         with gr.Tab("单独打包"):

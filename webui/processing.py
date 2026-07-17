@@ -74,7 +74,7 @@ class PackageSummary:
 
 @dataclass(frozen=True)
 class PackageProgress:
-    """打包进度：已写入文件数 / 待打包总文件数。"""
+    """打包进度：已写入图片数 / 待打包图片数。"""
     processed: int
     total: int
 
@@ -468,16 +468,32 @@ def hardlink_or_copy(src: Path, dest: Path, copy_fallback: bool = True) -> str:
     return "copy"
 
 
-def _schedule_delete(path: Path, delay_sec: int = 300) -> None:
+_DELETE_TIMERS: dict[Path, threading.Timer] = {}
+_DELETE_TIMERS_LOCK = threading.Lock()
+
+
+def _schedule_delete(path: Path, delay_sec: int = 600) -> None:
+    path = path.expanduser().resolve()
+    timer: threading.Timer
+
     def _worker() -> None:
-        time.sleep(int(delay_sec))
         try:
             path.unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             return
+        finally:
+            with _DELETE_TIMERS_LOCK:
+                if _DELETE_TIMERS.get(path) is timer:
+                    _DELETE_TIMERS.pop(path, None)
 
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
+    timer = threading.Timer(max(int(delay_sec), 0), _worker)
+    timer.daemon = True
+    with _DELETE_TIMERS_LOCK:
+        previous = _DELETE_TIMERS.get(path)
+        if previous is not None:
+            previous.cancel()
+        _DELETE_TIMERS[path] = timer
+    timer.start()
 
 
 def _iter_package_files(out_dir: Path) -> list[tuple[Path, Path]]:
@@ -495,12 +511,13 @@ def _iter_package_files(out_dir: Path) -> list[tuple[Path, Path]]:
 def package_output_dir(
     out_dir: Path,
     *,
-    keep_tmp_seconds: int = 300,
+    keep_tmp_seconds: int = 600,
     progress_callback: Optional[Callable[[PackageProgress], None]] = None,
 ) -> PackageSummary:
     """把输出目录打包为 zip（ZIP_STORED，等价 `zip -r -0`，只打包不压缩）。
 
-    progress_callback 在写入每个文件后回调，传递 PackageProgress(processed, total)。
+    progress_callback 按图片写入进度回调，传递 PackageProgress(processed, total)。
+    临时 zip 和输出目录中的 zip 默认保留 10 分钟后自动清理。
     失败时仍会调度清理临时 zip，避免 tmp 残留。
     """
     out_dir = out_dir.expanduser().resolve()
@@ -508,7 +525,10 @@ def package_output_dir(
         raise ValueError(f"输出目录不存在: {out_dir}")
 
     files = _iter_package_files(out_dir)
-    total = len(files)
+    image_exts = {ext.lower() for ext in IMAGE_EXTS}
+    image_total = sum(
+        1 for arcname, _abs_path in files if arcname.suffix.lower() in image_exts
+    )
 
     tmp_dir = Path(tempfile.gettempdir()).resolve()
     zip_tmp = unique_path(tmp_dir / out_dir.name).with_suffix(".zip")
@@ -516,16 +536,28 @@ def package_output_dir(
     try:
         # ZIP_STORED：不压缩，等价 zip -r -0
         with zipfile.ZipFile(zip_tmp, "w", compression=zipfile.ZIP_STORED) as zf:
-            processed = 0
+            image_processed = 0
+            if progress_callback is not None:
+                progress_callback(PackageProgress(processed=0, total=image_total))
             for arcname, abs_path in files:
                 # 强制 ZIP 条目名使用正斜杠（ZIP 规范），跨平台一致
                 zf.write(abs_path, arcname.as_posix())
-                processed += 1
-                if progress_callback is not None:
-                    progress_callback(PackageProgress(processed=processed, total=total))
+                if arcname.suffix.lower() in image_exts:
+                    image_processed += 1
+                    if progress_callback is not None:
+                        progress_callback(
+                            PackageProgress(
+                                processed=image_processed,
+                                total=image_total,
+                            )
+                        )
+            if progress_callback is not None:
+                progress_callback(
+                    PackageProgress(processed=image_total, total=image_total)
+                )
 
-        saved_base = unique_path(out_dir.parent / out_dir.name)
-        zip_saved = saved_base.with_suffix(".zip")
+        # 输出目录对应固定命名的 zip，避免下载按钮显示无意义的 `_1.zip`。
+        zip_saved = out_dir.parent / f"{out_dir.name}.zip"
         try:
             if zip_saved.resolve() != zip_tmp.resolve():
                 shutil.copy2(str(zip_tmp), str(zip_saved))
@@ -535,7 +567,10 @@ def package_output_dir(
             zip_saved = zip_tmp
 
         if keep_tmp_seconds > 0:
-            _schedule_delete(zip_tmp, delay_sec=int(keep_tmp_seconds))
+            delay_sec = int(keep_tmp_seconds)
+            _schedule_delete(zip_tmp, delay_sec=delay_sec)
+            if zip_saved.resolve() != zip_tmp.resolve():
+                _schedule_delete(zip_saved, delay_sec=delay_sec)
 
         return PackageSummary(out_dir=str(out_dir), zip_tmp_path=str(zip_tmp), zip_saved_path=str(zip_saved))
     except BaseException:

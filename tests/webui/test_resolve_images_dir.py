@@ -27,6 +27,19 @@ def test_container_absolute_within_images_dir(tmp_path: Path) -> None:
     assert resolved == (tmp_path / "smoke-set").resolve()
 
 
+def test_container_absolute_with_host_prefix_configured(tmp_path: Path) -> None:
+    images_dir = tmp_path / "container"
+    host_root = tmp_path / "host"
+    images_dir.mkdir()
+    host_root.mkdir()
+    resolved = resolve_images_dir(
+        str(images_dir / "uploads" / "20260714_101826"),
+        images_dir,
+        host_images_dir=host_root,
+    )
+    assert resolved == (images_dir / "uploads" / "20260714_101826").resolve()
+
+
 def test_container_absolute_outside_images_dir_rejected(tmp_path: Path) -> None:
     # 容器内绝对路径不在 images_dir 子树内，拒绝（返回 None），避免路径遍历
     resolved = resolve_images_dir("/etc/passwd", tmp_path)

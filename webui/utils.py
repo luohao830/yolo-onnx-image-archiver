@@ -122,6 +122,15 @@ def resolve_images_dir(
     candidate = Path(raw)
     if candidate.is_absolute():
         resolved = candidate.expanduser().resolve()
+        # 优先识别容器内绝对路径。即使配置了 HOST_IMAGES_DIR，用户仍可直接填写
+        # /data/images/uploads/... 这类容器内路径。
+        try:
+            resolved.relative_to(images_root)
+        except ValueError:
+            pass
+        else:
+            return resolved
+
         if host_images_dir is not None:
             host_prefix = host_images_dir.expanduser().resolve()
             try:
@@ -136,12 +145,7 @@ def resolve_images_dir(
                 # resolve() 跟随符号链接后逃逸出 images_dir，拒绝
                 return None
             return result
-        # 未配置 host_images_dir：仅允许 images_dir 子树内的容器绝对路径
-        try:
-            resolved.relative_to(images_root)
-        except ValueError:
-            return None
-        return resolved
+        return None
 
     rel = ensure_relative(raw)
     if rel is None:
