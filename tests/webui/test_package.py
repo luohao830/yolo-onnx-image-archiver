@@ -19,6 +19,7 @@ def test_package_uses_zip_stored(tmp_path: Path) -> None:
     pkg = package_output_dir(out_dir)
 
     assert Path(pkg.zip_saved_path).exists()
+    assert Path(pkg.zip_saved_path).name == "run1.zip"
     with zipfile.ZipFile(pkg.zip_saved_path) as zf:
         for info in zf.infolist():
             assert info.compress_type == zipfile.ZIP_STORED, (
@@ -43,6 +44,65 @@ def test_package_progress_callback(tmp_path: Path) -> None:
     assert Path(pkg.zip_saved_path).exists()
     # 最后一次回调应为全部处理完成
     assert seen and seen[-1][0] == seen[-1][1] == 3
+
+
+def test_package_progress_counts_only_images(tmp_path: Path) -> None:
+    out_dir = tmp_path / "run-mixed"
+    (out_dir / "person" / "images").mkdir(parents=True)
+    (out_dir / "person" / "labels").mkdir(parents=True)
+    (out_dir / "person" / "images" / "a.JPG").write_bytes(b"img-a")
+    (out_dir / "person" / "images" / "b.png").write_bytes(b"img-b")
+    (out_dir / "person" / "labels" / "a.txt").write_text("0 0.5 0.5 0.1 0.1", encoding="utf-8")
+
+    seen = []
+    pkg = package_output_dir(
+        out_dir,
+        progress_callback=lambda p: seen.append((p.processed, p.total)),
+    )
+
+    assert seen and seen[-1] == (2, 2)
+    with zipfile.ZipFile(pkg.zip_saved_path) as zf:
+        names = {info.filename for info in zf.infolist()}
+    assert "person/images/a.JPG" in names
+    assert "person/images/b.png" in names
+    assert "person/labels/a.txt" in names
+
+
+def test_package_progress_with_no_images(tmp_path: Path) -> None:
+    out_dir = tmp_path / "run-text-only"
+    out_dir.mkdir(parents=True)
+    (out_dir / "labels.txt").write_text("label", encoding="utf-8")
+
+    seen = []
+    pkg = package_output_dir(
+        out_dir,
+        progress_callback=lambda p: seen.append((p.processed, p.total)),
+    )
+
+    assert Path(pkg.zip_saved_path).exists()
+    assert seen and seen[0] == (0, 0) and seen[-1] == (0, 0)
+    with zipfile.ZipFile(pkg.zip_saved_path) as zf:
+        assert "labels.txt" in {info.filename for info in zf.infolist()}
+
+
+def test_package_schedules_both_zip_files_for_cleanup(tmp_path: Path, monkeypatch) -> None:
+    out_dir = tmp_path / "run-cleanup"
+    out_dir.mkdir(parents=True)
+    (out_dir / "a.jpg").write_bytes(b"img")
+
+    scheduled = []
+
+    def _capture(path: Path, delay_sec: int) -> None:
+        scheduled.append((path, delay_sec))
+
+    monkeypatch.setattr("webui.processing._schedule_delete", _capture)
+    pkg = package_output_dir(out_dir)
+
+    assert {path for path, _delay in scheduled} == {
+        Path(pkg.zip_tmp_path),
+        Path(pkg.zip_saved_path),
+    }
+    assert {delay for _path, delay in scheduled} == {600}
 
 
 def test_package_missing_dir(tmp_path: Path) -> None:
