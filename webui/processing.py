@@ -77,6 +77,7 @@ class PackageProgress:
     """打包进度：已写入图片数 / 待打包图片数。"""
     processed: int
     total: int
+    completed: bool = False
 
 
 @dataclass(frozen=True)
@@ -557,10 +558,10 @@ def package_output_dir(
                                 total=image_total,
                             )
                         )
-            if progress_callback is not None:
-                progress_callback(
-                    PackageProgress(processed=image_total, total=image_total)
-                )
+        if progress_callback is not None:
+            progress_callback(
+                PackageProgress(processed=image_total, total=image_total, completed=True)
+            )
 
         # 首次打包使用简洁名称，重复或并发打包时分配独立 zip，避免互相覆盖。
         with _DELETE_TIMERS_LOCK:

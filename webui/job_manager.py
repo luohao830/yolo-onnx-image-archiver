@@ -14,6 +14,7 @@ from webui.utils import get_logger
 
 
 logger = get_logger(__name__)
+_WORKER_DEATH_GRACE_SEC = 0.5
 
 
 @dataclass
@@ -24,6 +25,7 @@ class JobState:
     error: Optional[str] = None
     worker_index: int = -1
     worker_process: Any = None
+    worker_dead_at: Optional[float] = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -121,6 +123,17 @@ class InferenceJobManager:
             old_process.join(timeout=1.0)
         except Exception:  # noqa: BLE001
             pass
+        if self._process_alive(old_process):
+            try:
+                old_process.kill()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                old_process.join(timeout=1.0)
+            except Exception:  # noqa: BLE001
+                pass
+        if self._process_alive(old_process):
+            raise RuntimeError("推理 worker 无法退出，已停止重启")
         gpu_index = idx if self._visible_gpu_count() >= 1 else None
         new_queue: "mp.Queue[Dict[str, Any]]" = self._ctx.Queue()
         proc = create_worker_process(new_queue, self._event_queue, gpu_index=gpu_index)
@@ -239,20 +252,27 @@ class InferenceJobManager:
                 process_changed = (
                     job.worker_process is not None and slot.process is not job.worker_process
                 )
-                if process_changed or not self._process_alive(job.worker_process):
-                    message = "推理 worker 异常退出，任务未返回结果"
-                    job.error = message
-                    job.done = True
-                    job.events.append(
-                        {
-                            "job_id": job_id,
-                            "type": "error",
-                            "data": {"message": message},
-                        }
-                    )
-                    if not process_changed:
-                        restart_idx = job.worker_index
-                        restart_process = job.worker_process
+                worker_dead = process_changed or not self._process_alive(job.worker_process)
+                if worker_dead:
+                    now = time.monotonic()
+                    if job.worker_dead_at is None:
+                        job.worker_dead_at = now
+                    elif now - job.worker_dead_at >= _WORKER_DEATH_GRACE_SEC:
+                        message = "推理 worker 异常退出，任务未返回结果"
+                        job.error = message
+                        job.done = True
+                        job.events.append(
+                            {
+                                "job_id": job_id,
+                                "type": "error",
+                                "data": {"message": message},
+                            }
+                        )
+                        if not process_changed:
+                            restart_idx = job.worker_index
+                            restart_process = job.worker_process
+                else:
+                    job.worker_dead_at = None
 
             done = bool(job.done and not job.events)
 

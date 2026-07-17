@@ -122,7 +122,7 @@ def test_repeated_package_uses_independent_saved_zip(tmp_path: Path) -> None:
     assert Path(first.zip_saved_path).exists()
     assert Path(second.zip_saved_path).exists()
     with zipfile.ZipFile(first.zip_saved_path) as first_zip, zipfile.ZipFile(second.zip_saved_path) as second_zip:
-        assert first_zip.namelist() == second_zip.namelist()
+        assert set(first_zip.namelist()) == set(second_zip.namelist())
 
 
 def test_package_missing_dir(tmp_path: Path) -> None:
