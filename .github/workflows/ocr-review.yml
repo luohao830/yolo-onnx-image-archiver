@@ -7,8 +7,9 @@
 # Required secrets/vars (Settings -> Secrets and variables -> Actions):
 #   secret  OCR_LLM_URL           LLM API endpoint
 #   secret  OCR_LLM_AUTH_TOKEN    LLM auth token (mapped to OCR_LLM_TOKEN)
-#   variable OCR_LLM_MODEL        model name
-#   variable OCR_LLM_PROTOCOL     anthropic / openai / openai-responses
+#   variable OCR_LLM_MODEL             model name
+#   variable OCR_LLM_PROTOCOL          anthropic / openai / openai-responses
+#   variable OCR_LLM_REASONING_EFFORT  reasoning level, e.g. low / medium / high / xhigh
 #
 # For the full list of action inputs/outputs and the four comment-posting modes
 # (sticky / incremental), see action.yml at the repo root.
@@ -124,6 +125,8 @@ jobs:
           llm_model: ${{ vars.OCR_LLM_MODEL }}
           # 当前 action.yml 仍要求兼容输入；OCR_LLM_PROTOCOL 存在时会优先于它。
           llm_use_anthropic: ${{ vars.OCR_LLM_PROTOCOL == 'anthropic' && 'true' || 'false' }}
+          # 由简单等级变量生成 Responses API 的 reasoning.effort 请求体；留空时不注入额外字段。
+          llm_extra_body: ${{ vars.OCR_LLM_REASONING_EFFORT && format('{{"reasoning":{{"effort":"{0}"}}}}', vars.OCR_LLM_REASONING_EFFORT) || '{}' }}
           language: Chinese
           # For issue_comment triggers, pass the resolved refs; for
           # pull_request_target the action resolves them from the event.
