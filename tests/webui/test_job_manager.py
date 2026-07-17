@@ -88,6 +88,8 @@ def test_job_done_marks_dead_worker_failed_and_restarts(monkeypatch) -> None:
 
 def test_restart_slot_isolates_old_request_queue(monkeypatch) -> None:
     manager = InferenceJobManager.__new__(InferenceJobManager)
+    manager._lock = threading.Lock()
+    manager._shutdown = False
     old_process = _FakeProcess(alive=False)
     old_queue = _FakeQueue()
     manager._slots = [_WorkerSlot(request_queue=old_queue, process=old_process)]
@@ -118,6 +120,7 @@ def test_submit_failure_marks_job_done_and_restarts_worker(monkeypatch) -> None:
     old_process = _FakeProcess(alive=True)
     old_queue = _FailingQueue()
     manager._lock = threading.Lock()
+    manager._shutdown = False
     manager._jobs = {}
     manager._next_slot = 0
     manager._slots = [_WorkerSlot(request_queue=old_queue, process=old_process)]

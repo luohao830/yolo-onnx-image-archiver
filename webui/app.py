@@ -770,6 +770,17 @@ def _output_run_choices() -> List[str]:
 
 
 def package_only(out_rel: str) -> Generator[Tuple[str, Optional[str], float], None, None]:
+    lock_fd = _acquire_run_lock()
+    if lock_fd is None:
+        yield "已有推理或打包任务在运行，请等待。", None, 0.0
+        return
+    try:
+        yield from _package_only_impl(out_rel)
+    finally:
+        _release_run_lock(lock_fd)
+
+
+def _package_only_impl(out_rel: str) -> Generator[Tuple[str, Optional[str], float], None, None]:
     _ensure_dirs()
     rel = ensure_relative(out_rel)
     if not rel:

@@ -99,6 +99,9 @@ class InferenceJobManager:
         *,
         force: bool = False,
     ) -> None:
+        with self._lock:
+            if self._shutdown:
+                return
         slot = self._slots[idx]
         if expected_process is not None and slot.process is not expected_process:
             return
@@ -168,6 +171,9 @@ class InferenceJobManager:
 
         slot = self._slots[idx]
         with slot.restart_lock:
+            with self._lock:
+                if self._shutdown:
+                    raise RuntimeError("推理任务管理器已关闭")
             expected_process = slot.process
             if not self._process_alive(expected_process):
                 self._restart_slot_locked(idx, expected_process=expected_process)
@@ -262,14 +268,16 @@ class InferenceJobManager:
         return len(self._slots)
 
     def shutdown(self) -> None:
-        self._shutdown = True
+        with self._lock:
+            self._shutdown = True
         for slot in self._slots:
-            try:
-                slot.request_queue.put({"command": "shutdown"})
-            except Exception:  # noqa: BLE001
-                pass
-            if slot.process.is_alive():
-                slot.process.join(timeout=2.0)
+            with slot.restart_lock:
+                try:
+                    slot.request_queue.put({"command": "shutdown"})
+                except Exception:  # noqa: BLE001
+                    pass
+                if self._process_alive(slot.process):
+                    slot.process.join(timeout=2.0)
 
 
 _JOB_MANAGER: Optional[InferenceJobManager] = None
