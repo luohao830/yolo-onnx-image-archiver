@@ -24,7 +24,7 @@ class JobState:
     done: bool = False
     error: Optional[str] = None
     worker_index: int = -1
-    worker_process: Any = None
+    worker_process: Optional[mp.Process] = None
     worker_dead_at: Optional[float] = None
     created_at: float = field(default_factory=time.time)
 
@@ -32,7 +32,7 @@ class JobState:
 @dataclass
 class _WorkerSlot:
     request_queue: "mp.Queue[Dict[str, Any]]"
-    process: Any
+    process: mp.Process
     restart_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
@@ -88,7 +88,7 @@ class InferenceJobManager:
             return 0
 
     @staticmethod
-    def _process_alive(process: Any) -> bool:
+    def _process_alive(process: Optional[mp.Process]) -> bool:
         try:
             return bool(process.is_alive())
         except Exception:  # noqa: BLE001
@@ -97,7 +97,7 @@ class InferenceJobManager:
     def _restart_slot_locked(
         self,
         idx: int,
-        expected_process: Any = None,
+        expected_process: Optional[mp.Process] = None,
         *,
         force: bool = False,
     ) -> None:
@@ -135,17 +135,45 @@ class InferenceJobManager:
         if self._process_alive(old_process):
             raise RuntimeError("推理 worker 无法退出，已停止重启")
         gpu_index = idx if self._visible_gpu_count() >= 1 else None
-        new_queue: "mp.Queue[Dict[str, Any]]" = self._ctx.Queue()
-        proc = create_worker_process(new_queue, self._event_queue, gpu_index=gpu_index)
-        proc.start()
+        new_queue: Optional["mp.Queue[Dict[str, Any]]"] = None
+        new_process: Optional[mp.Process] = None
+        try:
+            new_queue = self._ctx.Queue()
+            new_process = create_worker_process(new_queue, self._event_queue, gpu_index=gpu_index)
+            new_process.start()
+        except Exception:
+            if new_process is not None:
+                try:
+                    if self._process_alive(new_process):
+                        new_process.terminate()
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    new_process.join(timeout=1.0)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    if self._process_alive(new_process):
+                        new_process.kill()
+                        new_process.join(timeout=1.0)
+                except Exception:  # noqa: BLE001
+                    pass
+            if new_queue is not None:
+                try:
+                    new_queue.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
+
+        assert new_queue is not None and new_process is not None
         slot.request_queue = new_queue
-        slot.process = proc
+        slot.process = new_process
         try:
             old_queue.close()
         except Exception:  # noqa: BLE001
             pass
 
-    def _restart_slot(self, idx: int, expected_process: Any = None) -> None:
+    def _restart_slot(self, idx: int, expected_process: Optional[mp.Process] = None) -> None:
         slot = self._slots[idx]
         with slot.restart_lock:
             self._restart_slot_locked(idx, expected_process=expected_process)
@@ -241,7 +269,7 @@ class InferenceJobManager:
 
     def job_done(self, job_id: str) -> bool:
         restart_idx: Optional[int] = None
-        restart_process: Any = None
+        restart_process: Optional[mp.Process] = None
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
