@@ -101,6 +101,7 @@ class InferenceJobManager:
                 return
 
             old_process = slot.process
+            old_queue = slot.request_queue
             logger.warning("检测到推理 worker(%d) 已退出，正在重启", idx)
             # 回收旧进程，避免僵尸进程累积
             try:
@@ -108,9 +109,15 @@ class InferenceJobManager:
             except Exception:  # noqa: BLE001
                 pass
             gpu_index = idx if self._visible_gpu_count() >= 1 else None
-            proc = create_worker_process(slot.request_queue, self._event_queue, gpu_index=gpu_index)
+            new_queue: "mp.Queue[Dict[str, Any]]" = self._ctx.Queue()
+            proc = create_worker_process(new_queue, self._event_queue, gpu_index=gpu_index)
             proc.start()
+            slot.request_queue = new_queue
             slot.process = proc
+            try:
+                old_queue.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _collect_events(self) -> None:
         while not self._shutdown:

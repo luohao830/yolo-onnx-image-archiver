@@ -64,11 +64,17 @@ def _render_run_progress(stage: str, description: str, pct: float) -> str:
     )
 
 
-def _progress_update(stage: str, description: str, pct: float, *, visible: bool = True):
+def _progress_update(
+    stage: str,
+    description: str,
+    pct: float,
+    *,
+    visible: bool = True,
+) -> dict[str, object]:
     return gr.update(value=_render_run_progress(stage, description, pct), visible=visible)
 
 
-def _button_update(*, running: bool):
+def _button_update(*, running: bool) -> dict[str, object]:
     return gr.update(
         value=_RUN_BUTTON_BUSY if running else _RUN_BUTTON_IDLE,
         interactive=not running,
@@ -80,7 +86,7 @@ def _zip_update(
     *,
     visible: bool = False,
     display_path: Optional[str] = None,
-):
+) -> dict[str, object]:
     label = f"下载输出 zip（{display_path}）" if display_path else "下载输出 zip"
     return gr.update(
         value=path,
@@ -650,7 +656,26 @@ def _run_job_impl(
     )
 
 
-def run_job(*args):
+def run_job(
+    model_name: str,
+    images_rel: str,
+    model_type: str,
+    focus_coco_classes: List[str],
+    focus_custom_classes: List[str],
+    unmatched_label: str,
+    conf: float,
+    iou: float,
+    batch: int,
+    recursive: bool,
+    imgsz: Optional[int],
+    strict_hardlink: bool,
+    do_package: bool,
+    preprocess_workers: int,
+    prefetch_batches: int,
+    draw_boxes: bool,
+    save_txt: bool,
+    use_cpu: bool,
+) -> Generator[Tuple[str, Optional[str], object, object], None, None]:
     """串行执行推理任务，并统一控制按钮和进度面板状态。"""
     if not _RUN_LOCK.acquire(blocking=False):
         message = "已有推理任务在运行，请等待。"
@@ -669,7 +694,26 @@ def run_job(*args):
             _progress_update("推理进度", "准备开始推理...", 0.0),
             _button_update(running=True),
         )
-        yield from _run_job_impl(*args)
+        yield from _run_job_impl(
+            model_name=model_name,
+            images_rel=images_rel,
+            model_type=model_type,
+            focus_coco_classes=focus_coco_classes,
+            focus_custom_classes=focus_custom_classes,
+            unmatched_label=unmatched_label,
+            conf=conf,
+            iou=iou,
+            batch=batch,
+            recursive=recursive,
+            imgsz=imgsz,
+            strict_hardlink=strict_hardlink,
+            do_package=do_package,
+            preprocess_workers=preprocess_workers,
+            prefetch_batches=prefetch_batches,
+            draw_boxes=draw_boxes,
+            save_txt=save_txt,
+            use_cpu=use_cpu,
+        )
     finally:
         _RUN_LOCK.release()
 
