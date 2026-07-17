@@ -4,6 +4,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import pytest
+
 import webui.job_manager as job_manager_module
 import webui.processing as processing
 from webui.job_manager import InferenceJobManager, JobState, _WorkerSlot
@@ -15,6 +17,11 @@ class _FakeQueue:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FailingQueue(_FakeQueue):
+    def put(self, _item) -> None:
+        raise OSError("queue closed")
 
 
 class _FakeProcess:
@@ -104,6 +111,38 @@ def test_restart_slot_isolates_old_request_queue(monkeypatch) -> None:
     assert slot.request_queue is created[0][0]
     assert slot.request_queue is not old_queue
     assert slot.process is created[0][2]
+
+
+def test_submit_failure_marks_job_done_and_restarts_worker(monkeypatch) -> None:
+    manager = InferenceJobManager.__new__(InferenceJobManager)
+    old_process = _FakeProcess(alive=True)
+    old_queue = _FailingQueue()
+    manager._lock = threading.Lock()
+    manager._jobs = {}
+    manager._next_slot = 0
+    manager._slots = [_WorkerSlot(request_queue=old_queue, process=old_process)]
+    manager._event_queue = object()
+    manager._ctx = type("_Context", (), {"Queue": staticmethod(_FakeQueue)})()
+
+    created = []
+
+    def _create_worker(request_queue, _event_queue, gpu_index=None):
+        process = _FakeProcess(alive=False)
+        created.append((request_queue, gpu_index, process))
+        return process
+
+    monkeypatch.setattr(job_manager_module, "create_worker_process", _create_worker)
+
+    with pytest.raises(RuntimeError, match="推理任务提交失败"):
+        manager.submit({})
+
+    assert len(manager._jobs) == 1
+    job = next(iter(manager._jobs.values()))
+    assert job.done is True
+    assert job.error == "推理任务提交失败"
+    assert job.events[0]["type"] == "error"
+    assert old_queue.closed is True
+    assert created
 
 
 def test_old_delete_timer_cannot_remove_new_file(monkeypatch, tmp_path: Path) -> None:

@@ -531,7 +531,8 @@ def package_output_dir(
     )
 
     tmp_dir = Path(tempfile.gettempdir()).resolve()
-    zip_tmp = unique_path(tmp_dir / out_dir.name).with_suffix(".zip")
+    with _DELETE_TIMERS_LOCK:
+        zip_tmp = unique_path(tmp_dir / f"{out_dir.name}.zip")
     failed = False
     try:
         # ZIP_STORED：不压缩，等价 zip -r -0
@@ -556,9 +557,9 @@ def package_output_dir(
                     PackageProgress(processed=image_total, total=image_total)
                 )
 
-        # 输出目录对应固定命名的 zip，避免下载按钮显示无意义的 `_1.zip`。
-        zip_saved = out_dir.parent / f"{out_dir.name}.zip"
+        # 首次打包使用简洁名称，重复或并发打包时分配独立 zip，避免互相覆盖。
         with _DELETE_TIMERS_LOCK:
+            zip_saved = unique_path(out_dir.parent / f"{out_dir.name}.zip")
             try:
                 if zip_saved.resolve() != zip_tmp.resolve():
                     # 与同路径定时清理共用锁，避免旧 timer 在覆盖后误删新 zip。

@@ -19,7 +19,7 @@ def test_package_uses_zip_stored(tmp_path: Path) -> None:
     pkg = package_output_dir(out_dir)
 
     assert Path(pkg.zip_saved_path).exists()
-    assert Path(pkg.zip_saved_path).name == "run1.zip"
+    assert Path(pkg.zip_saved_path).stem.startswith("run1")
     with zipfile.ZipFile(pkg.zip_saved_path) as zf:
         for info in zf.infolist():
             assert info.compress_type == zipfile.ZIP_STORED, (
@@ -103,6 +103,25 @@ def test_package_schedules_both_zip_files_for_cleanup(tmp_path: Path, monkeypatc
         Path(pkg.zip_saved_path),
     }
     assert {delay for _path, delay in scheduled} == {600}
+
+
+def test_repeated_package_uses_independent_saved_zip(tmp_path: Path) -> None:
+    out_dir = tmp_path / "run-repeat"
+    out_dir.mkdir(parents=True)
+    (out_dir / "a.jpg").write_bytes(b"img")
+    for existing in out_dir.parent.glob("run-repeat*.zip"):
+        existing.unlink()
+
+    first = package_output_dir(out_dir, keep_tmp_seconds=0)
+    second = package_output_dir(out_dir, keep_tmp_seconds=0)
+
+    assert Path(first.zip_saved_path).stem.startswith("run-repeat")
+    assert Path(second.zip_saved_path).stem.startswith("run-repeat")
+    assert first.zip_saved_path != second.zip_saved_path
+    assert Path(first.zip_saved_path).exists()
+    assert Path(second.zip_saved_path).exists()
+    with zipfile.ZipFile(first.zip_saved_path) as first_zip, zipfile.ZipFile(second.zip_saved_path) as second_zip:
+        assert first_zip.namelist() == second_zip.namelist()
 
 
 def test_package_missing_dir(tmp_path: Path) -> None:
