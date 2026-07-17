@@ -469,7 +469,7 @@ def hardlink_or_copy(src: Path, dest: Path, copy_fallback: bool = True) -> str:
 
 
 _DELETE_TIMERS: dict[Path, threading.Timer] = {}
-_DELETE_TIMERS_LOCK = threading.Lock()
+_DELETE_TIMERS_LOCK = threading.RLock()
 
 
 def _schedule_delete(path: Path, delay_sec: int = 600) -> None:
@@ -477,14 +477,14 @@ def _schedule_delete(path: Path, delay_sec: int = 600) -> None:
     timer: threading.Timer
 
     def _worker() -> None:
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:  # noqa: BLE001
-            return
-        finally:
-            with _DELETE_TIMERS_LOCK:
-                if _DELETE_TIMERS.get(path) is timer:
-                    _DELETE_TIMERS.pop(path, None)
+        with _DELETE_TIMERS_LOCK:
+            if _DELETE_TIMERS.get(path) is not timer:
+                return
+            _DELETE_TIMERS.pop(path, None)
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:  # noqa: BLE001
+                return
 
     timer = threading.Timer(max(int(delay_sec), 0), _worker)
     timer.daemon = True
@@ -558,19 +558,21 @@ def package_output_dir(
 
         # 输出目录对应固定命名的 zip，避免下载按钮显示无意义的 `_1.zip`。
         zip_saved = out_dir.parent / f"{out_dir.name}.zip"
-        try:
-            if zip_saved.resolve() != zip_tmp.resolve():
-                shutil.copy2(str(zip_tmp), str(zip_saved))
-            else:
+        with _DELETE_TIMERS_LOCK:
+            try:
+                if zip_saved.resolve() != zip_tmp.resolve():
+                    # 与同路径定时清理共用锁，避免旧 timer 在覆盖后误删新 zip。
+                    shutil.copy2(str(zip_tmp), str(zip_saved))
+                else:
+                    zip_saved = zip_tmp
+            except FileNotFoundError:
                 zip_saved = zip_tmp
-        except FileNotFoundError:
-            zip_saved = zip_tmp
 
-        if keep_tmp_seconds > 0:
-            delay_sec = int(keep_tmp_seconds)
-            _schedule_delete(zip_tmp, delay_sec=delay_sec)
-            if zip_saved.resolve() != zip_tmp.resolve():
-                _schedule_delete(zip_saved, delay_sec=delay_sec)
+            if keep_tmp_seconds > 0:
+                delay_sec = int(keep_tmp_seconds)
+                _schedule_delete(zip_tmp, delay_sec=delay_sec)
+                if zip_saved.resolve() != zip_tmp.resolve():
+                    _schedule_delete(zip_saved, delay_sec=delay_sec)
 
         return PackageSummary(out_dir=str(out_dir), zip_tmp_path=str(zip_tmp), zip_saved_path=str(zip_saved))
     except BaseException:

@@ -22,6 +22,8 @@ class JobState:
     events: Deque[Dict[str, Any]] = field(default_factory=deque)
     done: bool = False
     error: Optional[str] = None
+    worker_index: int = -1
+    worker_process: Any = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -29,6 +31,7 @@ class JobState:
 class _WorkerSlot:
     request_queue: "mp.Queue[Dict[str, Any]]"
     process: Any
+    restart_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
 class InferenceJobManager:
@@ -82,18 +85,32 @@ class InferenceJobManager:
         except Exception:  # noqa: BLE001
             return 0
 
-    def _restart_slot(self, idx: int) -> None:
-        slot = self._slots[idx]
-        logger.warning("检测到推理 worker(%d) 已退出，正在重启", idx)
-        # 回收旧进程，避免僵尸进程累积
+    @staticmethod
+    def _process_alive(process: Any) -> bool:
         try:
-            slot.process.join(timeout=1.0)
+            return bool(process.is_alive())
         except Exception:  # noqa: BLE001
-            pass
-        gpu_index = idx if self._visible_gpu_count() >= 1 else None
-        proc = create_worker_process(slot.request_queue, self._event_queue, gpu_index=gpu_index)
-        proc.start()
-        slot.process = proc
+            return False
+
+    def _restart_slot(self, idx: int, expected_process: Any = None) -> None:
+        slot = self._slots[idx]
+        with slot.restart_lock:
+            if expected_process is not None and slot.process is not expected_process:
+                return
+            if self._process_alive(slot.process):
+                return
+
+            old_process = slot.process
+            logger.warning("检测到推理 worker(%d) 已退出，正在重启", idx)
+            # 回收旧进程，避免僵尸进程累积
+            try:
+                old_process.join(timeout=1.0)
+            except Exception:  # noqa: BLE001
+                pass
+            gpu_index = idx if self._visible_gpu_count() >= 1 else None
+            proc = create_worker_process(slot.request_queue, self._event_queue, gpu_index=gpu_index)
+            proc.start()
+            slot.process = proc
 
     def _collect_events(self) -> None:
         while not self._shutdown:
@@ -121,18 +138,24 @@ class InferenceJobManager:
                     job.error = str((event.get("data") or {}).get("message", "推理失败"))
 
     def submit(self, payload: Dict[str, Any]) -> str:
-        # 锁内只做注册与选取索引（含 _next_slot 自增，避免并发竞态），
-        # 把 _next_target_slot 中可能触发的进程重启 spawn 移到锁外，
-        # 避免阻塞其他 submit / poll_event / drop。
+        # 锁内只做任务编号与 worker 选择，把可能触发进程重启的 spawn 移到锁外。
         with self._lock:
             job_id = uuid.uuid4().hex
-            self._jobs[job_id] = JobState(job_id=job_id)
             idx = self._next_slot % len(self._slots)
             self._next_slot += 1
+
         slot = self._slots[idx]
-        if not slot.process.is_alive():
-            self._restart_slot(idx)
+        expected_process = slot.process
+        if not self._process_alive(expected_process):
+            self._restart_slot(idx, expected_process=expected_process)
             slot = self._slots[idx]
+
+        with self._lock:
+            self._jobs[job_id] = JobState(
+                job_id=job_id,
+                worker_index=idx,
+                worker_process=slot.process,
+            )
         slot.request_queue.put({"command": "infer", "job_id": job_id, "payload": payload})
         return job_id
 
@@ -152,9 +175,38 @@ class InferenceJobManager:
             time.sleep(0.05)
 
     def job_done(self, job_id: str) -> bool:
+        restart_idx: Optional[int] = None
+        restart_process: Any = None
         with self._lock:
             job = self._jobs.get(job_id)
-            return bool(job and job.done and not job.events)
+            if job is None:
+                return False
+
+            if not job.done and 0 <= job.worker_index < len(self._slots):
+                slot = self._slots[job.worker_index]
+                process_changed = (
+                    job.worker_process is not None and slot.process is not job.worker_process
+                )
+                if process_changed or not self._process_alive(job.worker_process):
+                    message = "推理 worker 异常退出，任务未返回结果"
+                    job.error = message
+                    job.done = True
+                    job.events.append(
+                        {
+                            "job_id": job_id,
+                            "type": "error",
+                            "data": {"message": message},
+                        }
+                    )
+                    if not process_changed:
+                        restart_idx = job.worker_index
+                        restart_process = job.worker_process
+
+            done = bool(job.done and not job.events)
+
+        if restart_idx is not None:
+            self._restart_slot(restart_idx, expected_process=restart_process)
+        return done
 
     def drop(self, job_id: str) -> None:
         with self._lock:
