@@ -4,8 +4,17 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import webui.job_manager as job_manager_module
 import webui.processing as processing
 from webui.job_manager import InferenceJobManager, JobState, _WorkerSlot
+
+
+class _FakeQueue:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeProcess:
@@ -18,6 +27,9 @@ class _FakeProcess:
 
     def join(self, timeout: float) -> None:
         self.joined = True
+
+    def start(self) -> None:
+        self.alive = True
 
 
 class _FakeTimer:
@@ -65,6 +77,33 @@ def test_job_done_marks_dead_worker_failed_and_restarts(monkeypatch) -> None:
     assert "worker 异常退出" in event["data"]["message"]
     assert restarted == [(0, process)]
     assert manager.job_done("job-1") is True
+
+
+def test_restart_slot_isolates_old_request_queue(monkeypatch) -> None:
+    manager = InferenceJobManager.__new__(InferenceJobManager)
+    old_process = _FakeProcess(alive=False)
+    old_queue = _FakeQueue()
+    manager._slots = [_WorkerSlot(request_queue=old_queue, process=old_process)]
+    manager._event_queue = object()
+    manager._ctx = type("_Context", (), {"Queue": staticmethod(_FakeQueue)})()
+    monkeypatch.setattr(manager, "_visible_gpu_count", lambda: 0)
+
+    created = []
+
+    def _create_worker(request_queue, _event_queue, gpu_index=None):
+        process = _FakeProcess(alive=False)
+        created.append((request_queue, gpu_index, process))
+        return process
+
+    monkeypatch.setattr(job_manager_module, "create_worker_process", _create_worker)
+
+    manager._restart_slot(0, expected_process=old_process)
+
+    slot = manager._slots[0]
+    assert old_queue.closed is True
+    assert slot.request_queue is created[0][0]
+    assert slot.request_queue is not old_queue
+    assert slot.process is created[0][2]
 
 
 def test_old_delete_timer_cannot_remove_new_file(monkeypatch, tmp_path: Path) -> None:
