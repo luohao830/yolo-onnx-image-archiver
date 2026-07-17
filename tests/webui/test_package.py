@@ -117,6 +117,7 @@ def test_repeated_package_uses_independent_saved_zip(tmp_path: Path) -> None:
 
     assert Path(first.zip_saved_path).stem.startswith("run-repeat")
     assert Path(second.zip_saved_path).stem.startswith("run-repeat")
+    assert first.zip_tmp_path != second.zip_tmp_path
     assert first.zip_saved_path != second.zip_saved_path
     assert Path(first.zip_saved_path).exists()
     assert Path(second.zip_saved_path).exists()

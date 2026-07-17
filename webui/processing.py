@@ -531,8 +531,13 @@ def package_output_dir(
     )
 
     tmp_dir = Path(tempfile.gettempdir()).resolve()
-    with _DELETE_TIMERS_LOCK:
-        zip_tmp = unique_path(tmp_dir / f"{out_dir.name}.zip")
+    fd, zip_tmp_name = tempfile.mkstemp(
+        prefix=f"{out_dir.name}_",
+        suffix=".zip",
+        dir=tmp_dir,
+    )
+    os.close(fd)
+    zip_tmp = Path(zip_tmp_name)
     failed = False
     try:
         # ZIP_STORED：不压缩，等价 zip -r -0
