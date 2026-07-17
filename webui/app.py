@@ -165,12 +165,24 @@ def _imageset_choices() -> List[str]:
     return sorted(choices)
 
 
+def _resolve_model_path(model_name: str) -> Optional[Path]:
+    raw_name = (model_name or "").strip()
+    if not raw_name:
+        return None
+    models_root = MODELS_DIR.resolve()
+    model_path = (models_root / raw_name).resolve()
+    try:
+        model_path.relative_to(models_root)
+    except ValueError:
+        return None
+    if not model_path.is_file() or model_path.suffix.lower() != ".onnx":
+        return None
+    return model_path
+
+
 def _load_names_for_model(model_name: str) -> List[str]:
-    model_name = (model_name or "").strip()
-    if not model_name:
-        return []
-    model_path = (MODELS_DIR / model_name).resolve()
-    if not model_path.exists():
+    model_path = _resolve_model_path(model_name)
+    if model_path is None:
         return []
 
     for ext in (".names", ".txt"):
@@ -356,9 +368,9 @@ def _run_job_impl(
     if not model_name:
         yield "请先选择/上传模型", None, _progress_update("推理进度", "请先选择/上传模型", 0.0, visible=False), _button_update(running=False)
         return
-    model_path = (MODELS_DIR / model_name).resolve()
-    if not model_path.exists():
-        message = f"模型不存在: {model_name}"
+    model_path = _resolve_model_path(model_name)
+    if model_path is None:
+        message = f"模型不存在或格式不支持: {model_name}"
         yield message, None, _progress_update("推理进度", message, 0.0, visible=False), _button_update(running=False)
         return
 

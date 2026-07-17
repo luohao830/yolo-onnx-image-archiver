@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,12 @@ class _FakeProcess:
     def join(self, timeout: float) -> None:
         self.joined = True
 
+    def terminate(self) -> None:
+        self.alive = False
+
+    def kill(self) -> None:
+        self.alive = False
+
     def start(self) -> None:
         self.alive = True
 
@@ -66,6 +73,7 @@ def test_job_done_marks_dead_worker_failed_and_restarts(monkeypatch) -> None:
             job_id="job-1",
             worker_index=0,
             worker_process=process,
+            worker_dead_at=time.monotonic() - 1.0,
         )
     }
     manager._slots = [_WorkerSlot(request_queue=object(), process=process)]
@@ -146,6 +154,9 @@ def test_submit_failure_marks_job_done_and_restarts_worker(monkeypatch) -> None:
     assert job.events[0]["type"] == "error"
     assert old_queue.closed is True
     assert created
+    assert manager._slots[0].request_queue is created[0][0]
+    assert manager._slots[0].process is created[0][2]
+    assert manager._slots[0].process.alive is True
 
 
 def test_old_delete_timer_cannot_remove_new_file(monkeypatch, tmp_path: Path) -> None:
