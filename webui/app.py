@@ -10,6 +10,11 @@ from typing import Generator, List, Optional, Tuple
 
 import gradio as gr
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback uses the thread lock only
+    fcntl = None
+
 from webui.archive_ingest import extract_upload_archive
 from webui.job_manager import get_job_manager
 from webui.processing import (
@@ -44,6 +49,40 @@ HOST_IMAGES_DIR = data_dir_from_env("HOST_IMAGES_DIR", str(IMAGES_DIR))
 _RUN_LOCK = threading.Lock()
 _RUN_BUTTON_IDLE = "开始推理"
 _RUN_BUTTON_BUSY = "推理中，请等待。"
+
+
+def _acquire_run_lock() -> Optional[int]:
+    """获取线程内和进程间的推理锁，返回需要保持打开的锁文件描述符。"""
+    if not _RUN_LOCK.acquire(blocking=False):
+        return None
+
+    lock_fd: Optional[int] = None
+    try:
+        if fcntl is not None:
+            IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+            lock_fd = os.open(IMAGES_DIR / ".run.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_fd
+    except BlockingIOError:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        _RUN_LOCK.release()
+        return None
+    except Exception:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        _RUN_LOCK.release()
+        raise
+
+
+def _release_run_lock(lock_fd: Optional[int]) -> None:
+    try:
+        if fcntl is not None and lock_fd is not None:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
+        _RUN_LOCK.release()
 
 
 def _render_run_progress(stage: str, description: str, pct: float) -> str:
@@ -574,10 +613,14 @@ def _run_job_impl(
             )
 
         if pkg_error:
-            logger.exception("打包失败")
+            package_exc = pkg_error[0]
+            logger.error(
+                "打包失败",
+                exc_info=(type(package_exc), package_exc, package_exc.__traceback__),
+            )
             zip_tmp = None
-            zip_saved_rel = f"打包失败: {pkg_error[0]}"
-            package_error_text = f"打包失败: {pkg_error[0]}"
+            zip_saved_rel = "打包失败，请查看服务日志。"
+            package_error_text = "打包失败，请查看服务日志。"
             yield (
                 package_error_text,
                 _zip_update(),
@@ -677,7 +720,8 @@ def run_job(
     use_cpu: bool,
 ) -> Generator[Tuple[str, Optional[str], object, object], None, None]:
     """串行执行推理任务，并统一控制按钮和进度面板状态。"""
-    if not _RUN_LOCK.acquire(blocking=False):
+    lock_fd = _acquire_run_lock()
+    if lock_fd is None:
         message = "已有推理任务在运行，请等待。"
         yield (
             message,
@@ -715,7 +759,7 @@ def run_job(
             use_cpu=use_cpu,
         )
     finally:
-        _RUN_LOCK.release()
+        _release_run_lock(lock_fd)
 
 
 def _output_run_choices() -> List[str]:
@@ -764,8 +808,12 @@ def package_only(out_rel: str) -> Generator[Tuple[str, Optional[str], float], No
         yield pkg_desc["value"], None, pkg_pct["value"]
 
     if pkg_error:
-        logger.exception("打包失败")
-        yield f"打包失败: {pkg_error[0]}", None, 0.0
+        package_exc = pkg_error[0]
+        logger.error(
+            "打包失败",
+            exc_info=(type(package_exc), package_exc, package_exc.__traceback__),
+        )
+        yield "打包失败，请查看服务日志。", None, 0.0
         return
 
     pkg = pkg_result[0]
@@ -877,7 +925,7 @@ def build_app() -> gr.Blocks:
                 visible=False,
             )
 
-            def _set_imageset_choices():
+            def _set_imageset_choices() -> gr.Dropdown:
                 return gr.Dropdown(choices=_imageset_choices())
 
             demo.load(_set_imageset_choices, inputs=[], outputs=[imageset_dropdown])
@@ -941,7 +989,7 @@ def build_app() -> gr.Blocks:
             pkg_zip = gr.File(label="下载 zip（临时文件）", interactive=False)
             pkg_progress_only = gr.Slider(0, 1, value=0, step=0.01, label="打包进度", interactive=False)
 
-            def _set_output_run_choices():
+            def _set_output_run_choices() -> gr.Dropdown:
                 return gr.Dropdown(choices=_output_run_choices())
 
             refresh_out_btn.click(_set_output_run_choices, inputs=[], outputs=[out_run])

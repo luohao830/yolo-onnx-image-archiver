@@ -92,32 +92,47 @@ class InferenceJobManager:
         except Exception:  # noqa: BLE001
             return False
 
+    def _restart_slot_locked(
+        self,
+        idx: int,
+        expected_process: Any = None,
+        *,
+        force: bool = False,
+    ) -> None:
+        slot = self._slots[idx]
+        if expected_process is not None and slot.process is not expected_process:
+            return
+        if not force and self._process_alive(slot.process):
+            return
+
+        old_process = slot.process
+        old_queue = slot.request_queue
+        logger.warning("检测到推理 worker(%d) 已退出，正在重启", idx)
+        if force and self._process_alive(old_process):
+            try:
+                old_process.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+        # 回收旧进程，避免僵尸进程累积
+        try:
+            old_process.join(timeout=1.0)
+        except Exception:  # noqa: BLE001
+            pass
+        gpu_index = idx if self._visible_gpu_count() >= 1 else None
+        new_queue: "mp.Queue[Dict[str, Any]]" = self._ctx.Queue()
+        proc = create_worker_process(new_queue, self._event_queue, gpu_index=gpu_index)
+        proc.start()
+        slot.request_queue = new_queue
+        slot.process = proc
+        try:
+            old_queue.close()
+        except Exception:  # noqa: BLE001
+            pass
+
     def _restart_slot(self, idx: int, expected_process: Any = None) -> None:
         slot = self._slots[idx]
         with slot.restart_lock:
-            if expected_process is not None and slot.process is not expected_process:
-                return
-            if self._process_alive(slot.process):
-                return
-
-            old_process = slot.process
-            old_queue = slot.request_queue
-            logger.warning("检测到推理 worker(%d) 已退出，正在重启", idx)
-            # 回收旧进程，避免僵尸进程累积
-            try:
-                old_process.join(timeout=1.0)
-            except Exception:  # noqa: BLE001
-                pass
-            gpu_index = idx if self._visible_gpu_count() >= 1 else None
-            new_queue: "mp.Queue[Dict[str, Any]]" = self._ctx.Queue()
-            proc = create_worker_process(new_queue, self._event_queue, gpu_index=gpu_index)
-            proc.start()
-            slot.request_queue = new_queue
-            slot.process = proc
-            try:
-                old_queue.close()
-            except Exception:  # noqa: BLE001
-                pass
+            self._restart_slot_locked(idx, expected_process=expected_process)
 
     def _collect_events(self) -> None:
         while not self._shutdown:
@@ -145,25 +160,49 @@ class InferenceJobManager:
                     job.error = str((event.get("data") or {}).get("message", "推理失败"))
 
     def submit(self, payload: Dict[str, Any]) -> str:
-        # 锁内只做任务编号与 worker 选择，把可能触发进程重启的 spawn 移到锁外。
+        # 锁内只做任务编号与 worker 选择，具体队列操作由 slot 锁保护。
         with self._lock:
             job_id = uuid.uuid4().hex
             idx = self._next_slot % len(self._slots)
             self._next_slot += 1
 
         slot = self._slots[idx]
-        expected_process = slot.process
-        if not self._process_alive(expected_process):
-            self._restart_slot(idx, expected_process=expected_process)
-            slot = self._slots[idx]
+        with slot.restart_lock:
+            expected_process = slot.process
+            if not self._process_alive(expected_process):
+                self._restart_slot_locked(idx, expected_process=expected_process)
+                slot = self._slots[idx]
 
-        with self._lock:
-            self._jobs[job_id] = JobState(
-                job_id=job_id,
-                worker_index=idx,
-                worker_process=slot.process,
-            )
-        slot.request_queue.put({"command": "infer", "job_id": job_id, "payload": payload})
+            with self._lock:
+                self._jobs[job_id] = JobState(
+                    job_id=job_id,
+                    worker_index=idx,
+                    worker_process=slot.process,
+                )
+            try:
+                slot.request_queue.put(
+                    {"command": "infer", "job_id": job_id, "payload": payload}
+                )
+            except Exception as exc:  # noqa: BLE001
+                message = "推理任务提交失败"
+                with self._lock:
+                    job = self._jobs.get(job_id)
+                    if job is not None:
+                        job.error = message
+                        job.done = True
+                        job.events.append(
+                            {
+                                "job_id": job_id,
+                                "type": "error",
+                                "data": {"message": message},
+                            }
+                        )
+                self._restart_slot_locked(
+                    idx,
+                    expected_process=slot.process,
+                    force=True,
+                )
+                raise RuntimeError(message) from exc
         return job_id
 
     def poll_event(self, job_id: str, timeout_sec: float = 0.2) -> Optional[Dict[str, Any]]:
