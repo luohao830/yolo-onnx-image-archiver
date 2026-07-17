@@ -67,7 +67,9 @@ class _FakeTimer:
 def test_job_done_marks_dead_worker_failed_and_restarts(monkeypatch) -> None:
     manager = InferenceJobManager.__new__(InferenceJobManager)
     process = _FakeProcess(alive=False)
+    old_queue = _FakeQueue()
     manager._lock = threading.Lock()
+    manager._shutdown = False
     manager._jobs = {
         "job-1": JobState(
             job_id="job-1",
@@ -76,21 +78,30 @@ def test_job_done_marks_dead_worker_failed_and_restarts(monkeypatch) -> None:
             worker_dead_at=time.monotonic() - 1.0,
         )
     }
-    manager._slots = [_WorkerSlot(request_queue=object(), process=process)]
+    manager._slots = [_WorkerSlot(request_queue=old_queue, process=process)]
+    manager._event_queue = object()
+    manager._ctx = type("_Context", (), {"Queue": staticmethod(_FakeQueue)})()
+    monkeypatch.setattr(manager, "_visible_gpu_count", lambda: 0)
 
-    restarted = []
-    monkeypatch.setattr(
-        manager,
-        "_restart_slot",
-        lambda idx, expected_process=None: restarted.append((idx, expected_process)),
-    )
+    created = []
+
+    def _create_worker(request_queue, _event_queue, gpu_index=None):
+        new_process = _FakeProcess(alive=False)
+        created.append((request_queue, gpu_index, new_process))
+        return new_process
+
+    monkeypatch.setattr(job_manager_module, "create_worker_process", _create_worker)
 
     assert manager.job_done("job-1") is False
     event = manager.poll_event("job-1", timeout_sec=0.0)
     assert event is not None
     assert event["type"] == "error"
     assert "worker 异常退出" in event["data"]["message"]
-    assert restarted == [(0, process)]
+    assert old_queue.closed is True
+    assert created
+    assert manager._slots[0].request_queue is created[0][0]
+    assert manager._slots[0].process is created[0][2]
+    assert manager._slots[0].process.alive is True
     assert manager.job_done("job-1") is True
 
 

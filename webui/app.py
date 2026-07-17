@@ -615,14 +615,18 @@ def _run_job_impl(
 
         t = threading.Thread(target=_run_package, daemon=True, name="yolo-package")
         t.start()
-        while t.is_alive():
-            t.join(timeout=0.2)
-            yield (
-                "",
-                _zip_update(),
-                _progress_update("打包进度", pkg_status["desc"], pkg_status["pct"]),
-                _button_update(running=True),
-            )
+        try:
+            while t.is_alive():
+                t.join(timeout=0.2)
+                yield (
+                    "",
+                    _zip_update(),
+                    _progress_update("打包进度", pkg_status["desc"], pkg_status["pct"]),
+                    _button_update(running=True),
+                )
+        finally:
+            # 生成器被取消时也要等待后台打包线程结束，再由外层释放运行锁。
+            t.join()
 
         if pkg_error:
             package_exc = pkg_error[0]
@@ -826,9 +830,12 @@ def _package_only_impl(out_rel: str) -> Generator[Tuple[str, Optional[str], floa
     yield pkg_desc["value"], None, 0.0
     t = threading.Thread(target=_run_pkg, daemon=True, name="yolo-package-only")
     t.start()
-    while t.is_alive():
-        t.join(timeout=0.2)
-        yield pkg_desc["value"], None, pkg_pct["value"]
+    try:
+        while t.is_alive():
+            t.join(timeout=0.2)
+            yield pkg_desc["value"], None, pkg_pct["value"]
+    finally:
+        t.join()
 
     if pkg_error:
         package_exc = pkg_error[0]
